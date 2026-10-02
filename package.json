@@ -1,0 +1,21 @@
+{
+  "name": "farmline-server",
+  "version": "0.1.2",
+  "build": 3,
+  "private": true,
+  "description": "farmline — farmer-first farm management, from hobby to full-time. Two faces (farmer + customer) over one record system. YARN ONLY (no npm).",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "check": "node --check src/index.js && node --check src/schedule.js && node --check src/projection.js && node --check src/money.js && node --check src/ladder.js",
+    "test": "node test/integration.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongoose": "^8.5.0"
+  }
+}

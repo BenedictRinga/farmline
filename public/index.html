@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F6F43">
+<title>farmline</title>
+<!--
+  farmline — the app. Zero dependencies, one file, served at /farmline/.
+
+  TWO FACES, ONE RECORD SYSTEM
+    Farmer   : today's work, treatments, crops, milk, eggs, plain sales
+    Customer : the farm's own shop — a PROJECTION of those records
+
+  FARMER-FIRST IS THE FOUNDATION (AGENTS.md rule 1). The farmer's work is the
+  product; money arrives later, as a consequence, in plain language. The vocab
+  guard on the server enforces it and this file must not contradict it.
+
+  THE LADDER — 3 free foundation rungs, then the 4-layer commercial ladder:
+    FARM · RECORD · SHARPEN  |  VERDICT · PLAN · OPERATE · COMMERCE
+  The first rungs are good enough to live on forever. The paid layers are entered
+  by ambition, never by a paywall at the door.
+-->
+<style>
+:root{
+  --ink:#0E1A12;
+  --text-primary:var(--ink);
+  --text-secondary:color-mix(in srgb, var(--ink) 68%, transparent);
+  --text-tertiary:color-mix(in srgb, var(--ink) 48%, transparent);
+  --border-primary:color-mix(in srgb, var(--ink) 85%, transparent);
+  --border-secondary:color-mix(in srgb, var(--ink) 38%, transparent);
+  --border-tertiary:color-mix(in srgb, var(--ink) 12%, transparent);
+  --bg:#FFFFFF;
+  --surface-muted:#F7F7F4;
+  --surface-sunken:#EFEFEA;
+  --action:#1F6F43;
+  --attention:#B4691F;
+  --alert:#B3261E;          /* reserved: withdrawal holds ONLY */
+  --alert-bg:#FDF1F0;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s6:24px; --s12:48px; --s24:96px;
+  --corner-scale:1;
+  --r-sm:calc(4px * var(--corner-scale));
+  --r-md:calc(12px * var(--corner-scale));
+  --r-lg:calc(16px * var(--corner-scale));
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;
+}
+@media (min-width:600px){ :root{ --corner-scale:1.1; } }
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{font-family:var(--font);background:var(--surface-sunken);color:var(--text-primary);
+     font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;line-height:1.25;font-weight:640}
+h1{font-size:25px;letter-spacing:-.02em} h2{font-size:19px} h3{font-size:16px}
+p{margin:0} .money{font-variant-numeric:tabular-nums}
+.wrap{max-width:520px;margin:0 auto;min-height:100vh;background:var(--bg);display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--border-tertiary);
+        padding:var(--s3) var(--s4);display:flex;align-items:center;gap:var(--s2)}
+.brand{font-weight:700;font-size:17px;letter-spacing:-.02em;flex:1}
+main{flex:1;padding:var(--s4);padding-bottom:var(--s24)}
+.card{background:var(--bg);border:1px solid var(--border-tertiary);border-radius:var(--r-lg);padding:var(--s4);margin-bottom:var(--s4)}
+.card.tint{background:var(--surface-muted)}
+.muted{color:var(--text-secondary);font-size:14px}
+.tiny{color:var(--text-tertiary);font-size:12.5px}
+.hr{height:1px;background:var(--border-tertiary);margin:var(--s4) 0}
+button{font-family:inherit;font-size:16px;cursor:pointer;border:0;background:none;color:inherit}
+.btn{min-height:48px;padding:0 var(--s4);border-radius:var(--r-md);background:var(--action);color:#fff;
+     font-weight:620;display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);width:100%}
+.btn:active{transform:translateY(1px)}
+.btn.ghost{background:var(--surface-muted);color:var(--text-primary);border:1px solid var(--border-tertiary)}
+.btn.sm{min-height:40px;font-size:14.5px;width:auto;padding:0 var(--s3)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.pill{min-height:36px;padding:0 var(--s3);border-radius:999px;border:1px solid var(--border-tertiary);
+      background:var(--surface-muted);font-size:13.5px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:var(--s1)}
+.seg{display:flex;border:1px solid var(--border-tertiary);border-radius:var(--r-md);overflow:hidden;background:var(--surface-muted)}
+.seg button{flex:1;min-height:44px;font-size:14px;font-weight:600;color:var(--text-secondary)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+input,select,textarea{font-family:inherit;font-size:16px;width:100%;min-height:48px;padding:0 var(--s3);
+  border:1px solid var(--border-secondary);border-radius:var(--r-md);background:var(--bg);color:var(--text-primary)}
+textarea{min-height:56px;padding:var(--s3);resize:none}
+input:focus-visible,select:focus-visible,textarea:focus-visible,.btn:focus-visible,button:focus-visible{outline:3px solid var(--action);outline-offset:2px}
+label{display:block;font-size:14px;font-weight:600;margin-bottom:var(--s1);margin-top:var(--s3)}
+.task,.ev{display:flex;gap:var(--s3);align-items:flex-start;min-height:48px;padding:var(--s3) 0;
+     border-bottom:1px solid var(--border-tertiary);text-align:left;width:100%}
+.task:last-child,.ev:last-child{border-bottom:0}
+.tick{flex:0 0 26px;height:26px;margin-top:1px;border-radius:50%;border:2px solid var(--border-secondary);
+      display:flex;align-items:center;justify-content:center;font-size:15px;color:transparent}
+.task[aria-pressed="true"] .tick{background:var(--action);border-color:var(--action);color:#fff}
+.t-title{font-weight:600;font-size:15.5px}
+.t-meta{font-size:13.5px;color:var(--text-secondary);margin-top:2px}
+.hold{background:var(--alert-bg);border:1px solid color-mix(in srgb,var(--alert) 30%,transparent);
+      border-radius:var(--r-lg);padding:var(--s4);margin-bottom:var(--s3)}
+.hold .hd{display:flex;gap:var(--s2);align-items:center;color:var(--alert);font-weight:680;font-size:15.5px}
+.hold .bar{height:6px;border-radius:99px;background:color-mix(in srgb,var(--alert) 18%,transparent);margin:var(--s3) 0 var(--s2);overflow:hidden}
+.hold .bar i{display:block;height:100%;background:var(--alert)}
+.item{display:flex;gap:var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--border-tertiary);align-items:center}
+.item:last-child{border-bottom:0} .item.out{opacity:.62}
+.item .thumb{flex:0 0 46px;height:46px;border-radius:var(--r-md);background:var(--surface-muted);
+  border:1px solid var(--border-tertiary);display:flex;align-items:center;justify-content:center;font-size:20px}
+.item .nm{font-weight:620;font-size:15.5px} .item .pr{font-size:13.5px;color:var(--text-secondary)}
+.stepper{display:flex;align-items:center;gap:var(--s1)}
+.stepper button{width:44px;height:44px;border-radius:var(--r-md);background:var(--surface-muted);
+  border:1px solid var(--border-tertiary);font-size:19px;font-weight:600}
+.stepper .q{min-width:30px;text-align:center;font-weight:660;font-variant-numeric:tabular-nums}
+.cartbar{position:sticky;bottom:0;z-index:26;background:var(--ink);color:#fff;
+  padding:var(--s3) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:var(--s3)}
+.cartbar .lbl{font-size:13px;opacity:.72} .cartbar .amt{font-weight:700;font-size:17px}
+.cartbar .btn{background:#fff;color:var(--ink);width:auto;padding:0 var(--s6)}
+.state-row{display:flex;gap:var(--s3);padding:var(--s2) 0}
+.dot{flex:0 0 20px;height:20px;border-radius:50%;border:2px solid var(--border-tertiary);margin-top:2px;
+     display:flex;align-items:center;justify-content:center;font-size:11px;color:transparent}
+.state-row.done .dot{background:var(--action);border-color:var(--action);color:#fff}
+.state-row.now .dot{border-color:var(--action);background:#fff}
+.state-row.future .dot{opacity:.5}
+.notice{background:var(--surface-muted);border:1px solid var(--border-tertiary);border-radius:var(--r-md);
+  padding:var(--s3);font-size:13.5px;color:var(--text-secondary)}
+.photo{height:150px;border-radius:var(--r-lg);overflow:hidden;display:flex;align-items:flex-end;padding:var(--s3);
+  background:radial-gradient(120px 80px at 22% 78%,#7FA36B 0,transparent 70%),
+             radial-gradient(200px 120px at 78% 88%,#9DBB86 0,transparent 70%),
+             linear-gradient(176deg,#CFE0F0 0,#EAF0E4 55%,#DCCFA8 100%)}
+.photo .tag{background:#ffffffdb;border-radius:var(--r-sm);padding:4px var(--s2);font-size:12.5px;color:var(--text-secondary)}
+.trust{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin-top:var(--s3)}
+.trust>div{background:var(--surface-muted);border-radius:var(--r-md);padding:var(--s2) var(--s3)}
+.trust .v{font-weight:680;font-size:15px} .trust .k{font-size:12.5px;color:var(--text-secondary)}
+/* ladder */
+.rung{display:flex;gap:var(--s3);padding:var(--s3);border:1px solid var(--border-tertiary);
+      border-radius:var(--r-lg);margin-bottom:var(--s2);background:var(--bg)}
+.rung.free{background:var(--surface-muted)}
+.rung.current{border-color:var(--action);border-width:2px;background:#F1F7F2}
+.rung.locked{opacity:.72}
+.rung .no{flex:0 0 30px;height:30px;border-radius:50%;background:var(--ink);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-weight:700;font-size:14px}
+.rung.free .no{background:var(--action)}
+.rung .nm{font-weight:700;font-size:15px;letter-spacing:.02em}
+.rung .q{font-size:13.5px;color:var(--text-secondary)}
+.rung .price{font-size:13px;font-weight:660;color:var(--action);margin-top:2px}
+.rung .layer{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;
+  background:#EDF3EE;color:var(--action);border-radius:999px;padding:2px var(--s2);margin-left:var(--s2)}
+.landing{background:var(--surface-muted);border-radius:var(--r-md);padding:var(--s3);margin-top:var(--s3)}
+.landing h4{margin:0 0 var(--s1);font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)}
+.landing ul{margin:0 0 var(--s3);padding-left:18px;font-size:14px}
+.hide{display:none !important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.banner{background:#FFF9EC;border:1px solid color-mix(in srgb,var(--attention) 28%,transparent);
+  color:#6b4110;border-radius:var(--r-md);padding:var(--s3);font-size:13.5px;margin-bottom:var(--s4)}
+.offline{background:#FDF1F0;border:1px solid color-mix(in srgb,var(--alert) 30%,transparent);color:#7a1b16;
+  border-radius:var(--r-md);padding:var(--s3);font-size:13.5px;margin-bottom:var(--s4)}
+footer{padding:var(--s6) var(--s4) var(--s12);color:var(--text-tertiary);font-size:12.5px}
+@media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <span class="brand">farmline</span>
+    <div class="seg" style="width:170px" role="group" aria-label="Switch view">
+      <button id="navFarmer" aria-pressed="true">Shamba</button>
+      <button id="navShop" aria-pressed="false">Dukani</button>
+    </div>
+    <button class="pill" id="navLadder">Rung</button>
+    <button class="pill" id="langBtn">SW</button>
+  </div>
+
+  <main>
+    <div id="net" class="offline hide"></div>
+
+    <!-- ══ AUTH ══ -->
+    <section id="vAuth">
+      <h1 id="authTitle">Karibu farmline</h1>
+      <p class="muted" id="authSub">Anza na shamba lako. Hakuna ruhusa inayohitajika.</p>
+      <div class="card" style="margin-top:var(--s4)">
+        <label for="aPhone">Namba ya simu</label>
+        <input id="aPhone" inputmode="tel" placeholder="07...">
+        <label for="aPin">PIN (namba 4+)</label>
+        <input id="aPin" inputmode="numeric" type="password" placeholder="****">
+        <label for="aFarm">Jina la shamba</label>
+        <input id="aFarm" placeholder="Mfano: Kimani's Farm">
+        <div style="margin-top:var(--s4)">
+          <button class="btn" id="btnRegister">Anza shamba jipya</button>
+        </div>
+        <div style="margin-top:var(--s3)">
+          <button class="btn ghost" id="btnLogin">Nina akaunti — ingia</button>
+        </div>
+      </div>
+      <div class="notice">
+        <strong>Mteja?</strong> Fungua kiungo cha shamba (mfano <span class="tiny">/farmline/s/jina-la-shamba</span>)
+        ili kuona na kuagiza. Hakuna app ya kupakua.
+      </div>
+    </section>
+
+    <!-- ══ FARMER ══ -->
+    <section id="vFarmer" class="hide">
+      <h1 id="greeting">Habari</h1>
+      <p class="muted" id="farmLine"></p>
+      <div class="hr"></div>
+
+      <div id="setupCard" class="hide">
+        <h2>Anza shamba lako</h2>
+        <p class="tiny">Ongeza kitu kimoja. Ratiba inajitengeneza yenyewe.</p>
+        <div class="card tint" style="margin-top:var(--s3)">
+          <label for="sPlot">Shamba (plot)</label>
+          <input id="sPlot" placeholder="Mfano: Plot B" value="Plot B">
+          <label for="sAcres">Ekari</label>
+          <input id="sAcres" inputmode="decimal" value="2">
+          <button class="btn ghost" id="btnPlot" style="margin-top:var(--s3)">Ongeza plot</button>
+          <div class="hr"></div>
+          <label>Wanyama</label>
+          <div style="display:flex;gap:var(--s2);flex-wrap:wrap">
+            <button class="pill" data-addgroup="cattle">🐄 Ng'ombe</button>
+            <button class="pill" data-addgroup="goats">🐐 Mbuzi</button>
+            <button class="pill" data-addgroup="layers">🐔 Kuku wa mayai</button>
+            <button class="pill" data-addgroup="broilers">🐤 Kuku wa nyama</button>
+            <button class="pill" data-addgroup="pigs">🐖 Nguruwe</button>
+          </div>
+          <div class="hr"></div>
+          <label>Mazao</label>
+          <div style="display:flex;gap:var(--s2);flex-wrap:wrap">
+            <button class="pill" data-addcrop="maize">🌽 Mahindi</button>
+            <button class="pill" data-addcrop="beans">🫘 Maharage</button>
+            <button class="pill" data-addcrop="napier">🌿 Napier</button>
+            <button class="pill" data-addcrop="kale">🥬 Sukuma wiki</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="holds"></div>
+
+      <h2 id="todayH">LEO</h2>
+      <p class="tiny" id="todayC"></p>
+      <div id="todayList"></div>
+
+      <div id="baselineWrap" class="hide">
+        <div class="hr"></div>
+        <h2>Tueleze: ulifanya lini mwisho?</h2>
+        <p class="tiny">Hatujui. Tuambie au tusahau — hatukudhani.</p>
+        <div id="baselineList"></div>
+      </div>
+
+      <div class="hr"></div>
+      <h2>Rekodi haraka</h2>
+      <div style="display:flex;gap:var(--s2);flex-wrap:wrap;margin-top:var(--s3)">
+        <button class="pill" data-log="milk">+ 42 L maziwa</button>
+        <button class="pill" data-log="eggs">+ 12 tray mayai</button>
+        <button class="pill" data-log="maize">+ 200 mahindi</button>
+        <button class="pill" data-log="deworm">💉 Dawa ya minyoo</button>
+      </div>
+      <p class="tiny" id="logOut" style="margin-top:var(--s3)"></p>
+
+      <div id="ordersWrap" class="hide">
+        <div class="hr"></div>
+        <h2>Oda</h2>
+        <div id="orders"></div>
+      </div>
+
+      <div class="hr"></div>
+      <h2>Pesa</h2>
+      <div class="card tint" style="margin-top:var(--s3)">
+        <div class="seg">
+          <button id="modeZU" aria-pressed="true">ZU (mazoezi)</button>
+          <button id="modeMP" aria-pressed="false">M-Pesa</button>
+        </div>
+        <p class="tiny" id="moneyNote" style="margin-top:var(--s3)"></p>
+        <p class="muted money" id="moneyBal" style="margin-top:var(--s2)"></p>
+      </div>
+      <button class="btn ghost" id="btnShopLink" style="margin-bottom:var(--s3)">Kiungo cha duka langu</button>
+      <button class="btn ghost" id="btnLogout">Toka</button>
+    </section>
+
+    <!-- ══ SHOP (customer) ══ -->
+    <section id="vShop" class="hide">
+      <div class="photo"><span class="tag" id="photoTag">Picha ya shamba — kutoka Photo Kit</span></div>
+      <div style="margin-top:var(--s3)">
+        <h1 id="shopName" style="font-size:22px">—</h1>
+        <p class="muted" id="shopArea"></p>
+        <p class="muted" id="shopStory" style="margin-top:var(--s2)"></p>
+      </div>
+      <div class="trust" id="shopTrust"></div>
+      <div class="hr"></div>
+      <h2 id="shopAvailH">Inapatikana leo</h2>
+      <p class="tiny">Moja kwa moja kutoka kumbukumbu za shamba. Sivyo leo, sivyo.</p>
+      <div id="shopList"></div>
+      <div class="hr"></div>
+      <div class="notice" id="shopTerms"></div>
+      <div style="margin-top:var(--s3);display:flex;gap:var(--s2);flex-wrap:wrap">
+        <button class="btn ghost sm" id="btnTrack">Fuatilia oda yangu</button>
+        <button class="btn ghost sm" id="btnCustomer">Ingia kama mteja</button>
+      </div>
+    </section>
+
+    <!-- ══ CHECKOUT ══ -->
+    <section id="vCheckout" class="hide">
+      <h1>Kamilisha oda</h1>
+      <div id="coLines" class="card tint" style="margin-top:var(--s4)"></div>
+      <label>Utapokeaje?</label>
+      <div class="seg"><button id="howPickup" aria-pressed="true">Kuchukua</button><button id="howDelivery" aria-pressed="false">Kufikishwa</button></div>
+      <label for="coSlot">Siku na saa</label>
+      <select id="coSlot"></select>
+      <div id="coAddrWrap" class="hide">
+        <label for="coAddr">Mahali pa kufikisha</label>
+        <input id="coAddr" placeholder="Mfano: Karuri, karibu na soko">
+      </div>
+      <label for="coNote">Ujumbe kwa mkulima</label>
+      <textarea id="coNote" placeholder="Mfano: niletee asubuhi mapema"></textarea>
+      <div class="hr"></div>
+      <div style="display:flex;justify-content:space-between" class="money"><span>Jumla</span><strong id="coTotal">KES 0</strong></div>
+      <p class="tiny" id="coMode" style="margin-top:var(--s2)"></p>
+      <button class="btn" id="btnPay" style="margin-top:var(--s4)">Lipa</button>
+      <button class="btn ghost" id="btnCoBack" style="margin-top:var(--s3)">Rudi</button>
+    </section>
+
+    <!-- ══ ORDER STATE ══ -->
+    <section id="vState" class="hide">
+      <h1>Oda yako</h1>
+      <p class="muted" id="stSub"></p>
+      <div class="hr"></div>
+      <div id="stList"></div>
+      <div class="notice" id="stNote" style="margin-top:var(--s4)"></div>
+      <button class="btn ghost" id="btnStBack" style="margin-top:var(--s4)">Rudi dukani</button>
+    </section>
+
+    <!-- ══ LADDER ══ -->
+    <section id="vLadder" class="hide">
+      <h1>Hatua za farmline</h1>
+      <p class="muted">Anza bure. Panda unapokuwa tayari — si kwa kulazimishwa.</p>
+      <div class="hr"></div>
+      <h2 style="font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Msingi — bure milele</h2>
+      <div id="rungFree"></div>
+      <div class="hr"></div>
+      <h2 style="font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Ngazi ya biashara — malipo</h2>
+      <div id="rungPaid"></div>
+      <div class="hr"></div>
+      <div id="ladderRec"></div>
+      <button class="btn ghost" id="btnLadderBack" style="margin-top:var(--s4)">Rudi</button>
+    </section>
+  </main>
+
+  <div class="cartbar hide" id="cartBar">
+    <div style="flex:1"><div class="lbl" id="cartCount">0</div><div class="amt money" id="cartAmount">KES 0</div></div>
+    <button class="btn" id="btnCartGo">Endelea</button>
+  </div>
+
+  <footer>
+    <strong>farmline haifanyi bado</strong><br>
+    ✗ Haiwezi kusoma M-Pesa yako yenyewe (inakuja, si lazima) ·
+    ✗ Hakuna soko la kuuza kwa mashamba mengine ·
+    ✗ Haifanyi kazi kwenye simu ya kawaida (feature phone)<br>
+    <span style="color:var(--text-secondary)">✓ Leo: ratiba · rekodi za dawa · kusubiri maziwa · mazao · mauzo rahisi · duka lako</span>
+  </footer>
+</div>
+
+<script>
+'use strict';
+const API = '/api/farmline';
+
+/** Where the app is mounted: '/farmline/', '/farmline', '/farmline/s/x' → '/farmline/'.
+ *  Derived, never hardcoded — the mount path is an nginx decision, not a build one.
+ *  The farm's share link is the product's distribution mechanism, so it must
+ *  survive being mounted anywhere. */
+function appBase() {
+  let p = location.pathname;
+  if (!p.endsWith('/')) p += '/';
+  const i = p.indexOf('/s/');
+  return i > -1 ? p.slice(0, i + 1) : p;
+}
+const $ = (s) => document.querySelector(s);
+const kes = (n) => 'KES ' + Number(n || 0).toLocaleString('en-KE');
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const S = { token: null, kind: null, farm: null, view: 'auth', lang: 'sw', cart: {}, how: 'pickup', order: null, shop: null, ladder: null };
+
+// ── API ───────────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  try {
+    const r = await fetch(API + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => null);
+    netOk();
+    return { status: r.status, body: j };
+  } catch (e) {
+    netDown();
+    return { status: 0, body: null, error: e.message };
+  }
+}
+function netDown() {
+  const el = $('#net'); el.classList.remove('hide');
+  el.textContent = S.lang === 'sw'
+    ? 'Hakuna mtandao. Kile ulichorekodi kinabaki kwenye simu na kitatumwa baadaye.'
+    : 'No connection. What you logged stays on the phone and sends later.';
+}
+function netOk() { $('#net').classList.add('hide'); }
+
+// ── views ─────────────────────────────────────────────────────────────────────
+function show(v) {
+  S.view = v;
+  for (const [id, key] of [['vAuth', 'auth'], ['vFarmer', 'farmer'], ['vShop', 'shop'], ['vCheckout', 'checkout'], ['vState', 'state'], ['vLadder', 'ladder']]) {
+    $('#' + id).classList.toggle('hide', key !== v);
+  }
+  $('#navFarmer').setAttribute('aria-pressed', v === 'farmer');
+  $('#navShop').setAttribute('aria-pressed', v === 'shop');
+  $('#navLadder').classList.toggle('hide', !S.token || S.kind !== 'farmer');
+  $('#cartBar').classList.toggle('hide', !(v === 'shop' && Object.keys(S.cart).length));
+  window.scrollTo(0, 0);
+}
+
+// ── FARMER ────────────────────────────────────────────────────────────────────
+async function loadFarmer() {
+  const me = await api('GET', '/me');
+  if (!me.body?.ok) { S.token = null; return show('auth'); }
+  S.farm = me.body.farm;
+  $('#greeting').textContent = (S.lang === 'sw' ? 'Habari, ' : 'Hello, ') + S.farm.name;
+  $('#farmLine').textContent = [S.farm.area, S.lang === 'sw' ? 'Umefikia hatua ' + S.farm.rung : 'Rung ' + S.farm.rung].filter(Boolean).join(' · ');
+
+  const t = await api('GET', '/farm/' + S.farm._id + '/today');
+  if (t.body?.ok) renderToday(t.body);
+  await loadOrders();
+  await loadMoney();
+  await loadLadder();
+  checkSetup(t.body);
+}
+
+function checkSetup(t) {
+  const empty = !t || (t.counts.today + t.counts.week + t.counts.baseline) === 0;
+  $('#setupCard').classList.toggle('hide', !empty);
+}
+
+function renderToday(t) {
+  const base = t.baseline || [], due = t.dueToday || [], week = t.thisWeek || [];
+  $('#todayC').textContent = S.lang === 'sw'
+    ? `${due.length} leo · ${week.length} wiki hii`
+    : `${due.length} today · ${week.length} this week`;
+  const row = (e) => `
+    <button class="task" data-complete="${e._id}" aria-pressed="false">
+      <span class="tick" aria-hidden="true">✓</span>
+      <span style="flex:1">
+        <span class="t-title">${esc(e.intervention.split('.').pop().replace(/-/g, ' '))}</span>
+        <span class="t-meta">${esc(e.subjectLabel)}${e.costEstimate ? ' · ~' + kes(e.costEstimate) : ''}${
+          e.overdueDays ? ' · ' + e.overdueDays + (S.lang === 'sw' ? ' siku zimepita' : ' days late') : ''}</span>
+      </span>
+    </button>`;
+  const all = [...due, ...week];
+  $('#todayList').innerHTML = all.length ? all.map(row).join('') : '<p class="muted">Hakuna kazi leo.</p>';
+  $('#baselineWrap').classList.toggle('hide', !base.length);
+  $('#baselineList').innerHTML = base.map(row).join('');
+  renderHolds(t.holds || []);
+}
+
+function renderHolds(holds) {
+  if (!holds.length) { $('#holds').innerHTML = ''; return; }
+  $('#holds').innerHTML = holds.map((h) => {
+    const left = h.daysLeft || 1, done = Math.max(1, (h.days || 1) - left + 1);
+    const pct = Math.min(100, Math.round((done / (h.days || 1)) * 100));
+    const prod = (h.affects || []).map((a) => ({ milk: 'maziwa', meat: 'nyama', eggs: 'mayai' }[a] || a)).join(', ');
+    return `<div class="hold" role="status">
+      <div class="hd"><span aria-hidden="true">⚠</span> <span>Usiuze: ${esc(prod)}</span></div>
+      <p style="margin-top:var(--s2);font-size:14.5px"><strong>${esc(h.subjectLabel)}</strong> — ${esc(h.product)}<br>
+      <span class="muted">Salama kuuza: ${new Date(h.until).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}</span></p>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <p class="tiny">${left} ${S.lang === 'sw' ? 'siku zilizobaki' : 'days left'}</p></div>`;
+  }).join('');
+}
+
+async function loadOrders() {
+  const r = await api('GET', '/farm/' + S.farm._id + '/orders');
+  const orders = r.body?.orders || [];
+  $('#ordersWrap').classList.toggle('hide', !orders.length);
+  $('#orders').innerHTML = orders.slice(0, 5).map((o) => `
+    <div class="card tint" style="margin-top:var(--s3)">
+      <div style="display:flex;justify-content:space-between"><strong>${esc(o.ref)}</strong><span class="money">${kes(o.total)}</span></div>
+      <p class="muted" style="margin-top:var(--s2)">${o.lines.map((l) => l.qty + ' × ' + esc(l.label)).join(' · ')}</p>
+      <p class="tiny">${esc(o.how)} · ${esc(o.slot)} · ${esc(o.payment?.status || '')}</p>
+      ${o.stage < 5 ? `<button class="btn sm" style="margin-top:var(--s2)" data-advance="${o._id}" data-stage="${o.stage + 1}">Endeleza</button>` : '<p class="tiny" style="margin-top:var(--s2)">✓ Imekamilika</p>'}
+    </div>`).join('');
+}
+
+async function loadMoney() {
+  const r = await api('GET', '/farm/' + S.farm._id + '/money');
+  if (!r.body?.ok) return;
+  const m = r.body;
+  $('#modeZU').setAttribute('aria-pressed', m.mode === 'virtual');
+  $('#modeMP').setAttribute('aria-pressed', m.mode === 'mpesa');
+  $('#moneyBal').textContent = m.mode === 'virtual'
+    ? `${m.balances.zu} ZU` + (S.lang === 'sw' ? ' (mazoezi — si pesa halisi)' : ' (practice — not real money)')
+    : `${kes(m.balances.kes)}` + (S.lang === 'sw' ? ' imepokelewa' : ' received');
+  $('#moneyNote').textContent = m.mpesaConfigured
+    ? (S.lang === 'sw' ? 'M-Pesa imeunganishwa.' : 'M-Pesa is connected.')
+    : (S.lang === 'sw'
+        ? 'M-Pesa haijaunganishwa bado. Tumia ZU kufanya mazoezi ya kuuza — wateja wako wanaweza kuagiza bila pesa halisi.'
+        : 'M-Pesa is not connected yet. Use ZU to practise selling — your customers can order without real money.');
+}
+
+async function loadLadder() {
+  const r = await api('GET', '/farm/' + S.farm._id + '/ladder');
+  if (!r.body?.ok) return;
+  S.ladder = r.body;
+  const card = (g, paid) => `
+    <div class="rung ${paid ? '' : 'free'} ${g.rung === S.ladder.currentRung ? 'current' : ''}">
+      <div class="no">${g.rung}</div>
+      <div style="flex:1">
+        <div class="nm">${esc(g.name)}${paid ? `<span class="layer">layer ${g.layer}</span>` : ''}</div>
+        <div class="q">${esc(g.question)}</div>
+        <div class="price">${g.free ? (S.lang === 'sw' ? 'Bure' : 'Free') : esc(g.priceLabel)}</div>
+      </div>
+    </div>`;
+  $('#rungFree').innerHTML = S.ladder.foundation.map((g) => card(g, false)).join('');
+  $('#rungPaid').innerHTML = S.ladder.commercial.map((g) => card(g, true)).join('');
+
+  const rec = S.ladder.recommendation;
+  const gaps = S.ladder.gaps.filter((g) => g.for === (rec ? rec.rung : ''));
+  $('#ladderRec').innerHTML = rec ? `
+    <div class="card tint">
+      <h3>${S.lang === 'sw' ? 'Tunashauri' : 'We suggest'}: ${esc(rec.name)}</h3>
+      <p class="muted" style="margin-top:var(--s2)">${esc(S.ladder.reason[S.lang] || S.ladder.reason.en)}</p>
+      <div class="landing">
+        <h4>${S.lang === 'sw' ? 'Utapata' : 'What you get'}</h4>
+        <ul>${(rec.whatYouGet || []).map((x) => '<li>' + esc(x) + '</li>').join('')}</ul>
+        <h4>${S.lang === 'sw' ? 'Utatoa' : 'What you give'}</h4>
+        <ul>${(rec.whatYouGive || []).map((x) => '<li>' + esc(x) + '</li>').join('')}</ul>
+        <p class="tiny">${S.lang === 'sw' ? 'Muda' : 'Commitment'}: ${esc(rec.commitment || '')}</p>
+      </div>
+      ${gaps.length ? `<p class="tiny" style="margin-top:var(--s3)">${S.lang === 'sw' ? 'Bado:' : 'Not yet:'} ${gaps.map((g) => esc(g[S.lang] || g.en)).join('; ')}</p>` : ''}
+      ${rec.rung > S.ladder.currentRung ? `<button class="btn" style="margin-top:var(--s3)" data-accept="${rec.rung}">${S.lang === 'sw' ? 'Kubali' : 'Accept'}</button>` : '<p class="tiny" style="margin-top:var(--s3)">✓ Uko hapa</p>'}
+    </div>` : '';
+}
+
+// ── SHOP ──────────────────────────────────────────────────────────────────────
+async function loadShop(slug) {
+  const r = await api('GET', '/shop/' + (slug || (S.farm && S.farm.slug)));
+  if (!r.body?.ok) { $('#shopName').textContent = S.lang === 'sw' ? 'Duka halipatikani' : 'Shop unavailable'; return; }
+  S.shop = r.body;
+  const f = r.body.farm || {};
+  $('#shopName').textContent = f.name || '—';
+  $('#shopArea').textContent = f.area || '';
+  $('#shopStory').textContent = f.story || '';
+  const tr = f.trust || {};
+  $('#shopTrust').innerHTML = `
+    <div><div class="v">${Math.round((tr.withdrawalAdherence ?? 1) * 100)}%</div><div class="k">Kuepuka dawa kwenye maziwa</div></div>
+    <div><div class="v">${tr.ordersFulfilled || 0}</div><div class="k">Oda zilizokamilika</div></div>`;
+  $('#shopTerms').innerHTML = `<strong>Masharti</strong><br>${esc(
+    `Kuchukua: bure. Kufikishwa: ${kes(f.terms?.deliveryFee || 0)} ndani ya km ${f.terms?.deliveryRadiusKm || 6}.`)}`;
+  renderShopList();
+}
+
+function renderShopList() {
+  const items = (S.shop && S.shop.availability) || [];
+  $('#shopList').innerHTML = items.length ? items.map((it) => {
+    const qty = S.cart[it.product] || 0;
+    const note = it.suppressed
+      ? `<span style="color:var(--alert);font-weight:620">⛔ ${esc(it.reason || 'Haipatikani')}</span>`
+      : it.available ? `<span class="tiny">${it.qty} ${esc(it.unit)}</span>` : `<span class="tiny">Haipatikani leo</span>`;
+    return `<div class="item ${it.available ? '' : 'out'}">
+      <div class="thumb" aria-hidden="true">${esc(it.icon || '·')}</div>
+      <div style="flex:1;min-width:0">
+        <div class="nm">${esc(it.label)}</div>
+        <div class="pr money">${kes(it.price)} <span class="muted">/ ${esc(it.unit)}</span></div>
+        <div>${note}</div>
+      </div>
+      ${it.available ? `<div class="stepper">${qty ? `<button data-dec="${it.product}">−</button><span class="q">${qty}</span>` : ''}<button data-inc="${it.product}">+</button></div>` : ''}
+    </div>`;
+  }).join('') : '<p class="muted">Shamba halijapanga kitu cha kuuza bado.</p>';
+  renderCart();
+}
+
+function cartLines() {
+  const items = (S.shop && S.shop.availability) || [];
+  return Object.entries(S.cart).map(([p, q]) => {
+    const it = items.find((x) => x.product === p);
+    return it ? { product: p, label: it.label, unit: it.unit, qty: q, price: it.price, sum: it.price * q } : null;
+  }).filter(Boolean);
+}
+function cartTotal() {
+  const sub = cartLines().reduce((a, l) => a + l.sum, 0);
+  const fee = (S.how === 'delivery' && sub > 0) ? ((S.shop?.farm?.terms?.deliveryFee) || 0) : 0;
+  return { sub, fee, total: sub + fee };
+}
+function renderCart() {
+  const n = cartLines().reduce((a, l) => a + l.qty, 0);
+  $('#cartCount').textContent = n + (S.lang === 'sw' ? ' vitu' : (n === 1 ? ' item' : ' items'));
+  $('#cartAmount').textContent = kes(cartTotal().total);
+  $('#cartBar').classList.toggle('hide', !(S.view === 'shop' && n));
+}
+
+function renderCheckout() {
+  const { sub, fee, total } = cartTotal();
+  $('#coLines').innerHTML = cartLines().map((l) =>
+    `<div style="display:flex;justify-content:space-between"><span>${l.qty} × ${esc(l.label)}</span><span class="money">${kes(l.sum)}</span></div>`).join('')
+    + `<div class="hr"></div><div style="display:flex;justify-content:space-between" class="money"><span>Ada ya kufikisha</span><span>${fee ? kes(fee) : 'Bure'}</span></div>`;
+  $('#coTotal').textContent = kes(total);
+  $('#coMode').textContent = S.shop?.moneyMode === 'virtual'
+    ? 'Malipo kwa ZU (mazoezi).'
+    : 'Malipo kwa M-Pesa — pesa huenda kwa mkulima moja kwa moja.';
+  const slots = (S.how === 'delivery' ? S.shop?.farm?.slots?.delivery : S.shop?.farm?.slots?.pickup) || [];
+  $('#coSlot').innerHTML = (slots.length ? slots : ['Kesho 7:00 – 9:00 asubuhi', 'Kesho 4:00 – 6:00 jioni'])
+    .map((s) => `<option>${esc(s)}</option>`).join('');
+  $('#coAddrWrap').classList.toggle('hide', S.how !== 'delivery');
+  $('#howPickup').setAttribute('aria-pressed', S.how === 'pickup');
+  $('#howDelivery').setAttribute('aria-pressed', S.how === 'delivery');
+}
+
+const STAGES = ['Imetumwa', 'Mkulima amethibitisha', 'Inavunwa / kupangwa', 'Tayari', 'Imefikishwa', 'Imekamilika'];
+function renderState() {
+  const o = S.order; if (!o) return;
+  $('#stSub').textContent = o.ref + ' · ' + kes(o.total);
+  $('#stList').innerHTML = STAGES.map((lab, i) => {
+    const cls = i < o.stage ? 'done' : i === o.stage ? 'now' : 'future';
+    return `<div class="state-row ${cls}"><span class="dot" aria-hidden="true">✓</span>
+      <span><span style="font-weight:600;font-size:15px">${esc(lab)}</span>
+      ${i === o.stage ? `<div class="tiny">${esc(o.how)} · ${esc(o.slot || '')}</div>` : ''}</span></div>`;
+  }).join('');
+  $('#stNote').textContent = o.stage >= 5 ? 'Asante kwa kununua kutoka shamba la jirani.' : 'Utapata taarifa kila hatua inapobadilika.';
+}
+
+// ── events ────────────────────────────────────────────────────────────────────
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset;
+
+  if (b.id === 'langBtn') { S.lang = S.lang === 'sw' ? 'en' : 'sw'; $('#langBtn').textContent = S.lang === 'sw' ? 'SW' : 'EN'; return refresh(); }
+  if (b.id === 'navFarmer') return show(S.token && S.kind === 'farmer' ? 'farmer' : 'auth');
+  if (b.id === 'navShop') { await loadShop(); return show('shop'); }
+  if (b.id === 'navLadder') { await loadLadder(); return show('ladder'); }
+  if (b.id === 'btnLadderBack' || b.id === 'btnCoBack') return show(S.kind === 'farmer' ? 'farmer' : 'shop');
+  if (b.id === 'btnStBack') return show(S.kind === 'farmer' ? 'farmer' : 'shop');
+
+  // auth
+  if (b.id === 'btnRegister') {
+    const r = await api('POST', '/auth/farmer/register', {
+      phone: $('#aPhone').value.trim(), pin: $('#aPin').value.trim(),
+      farmName: $('#aFarm').value.trim() || 'My Farm', name: $('#aFarm').value.trim(),
+    });
+    if (!r.body?.ok) { $('#authSub').textContent = r.body?.error || 'Registration failed'; return; }
+    S.token = r.body.token; S.kind = 'farmer';
+    await loadFarmer(); return show('farmer');
+  }
+  if (b.id === 'btnLogin') {
+    const r = await api('POST', '/auth/farmer/login', { phone: $('#aPhone').value.trim(), pin: $('#aPin').value.trim() });
+    if (!r.body?.ok) { $('#authSub').textContent = r.body?.error || 'Sign-in failed'; return; }
+    S.token = r.body.token; S.kind = 'farmer';
+    await loadFarmer(); return show('farmer');
+  }
+  if (b.id === 'btnLogout') { S.token = null; S.kind = null; return show('auth'); }
+
+  // setup
+  if (b.id === 'btnPlot') {
+    await api('POST', `/farm/${S.farm._id}/plots`, { name: $('#sPlot').value.trim() || 'Plot', acres: Number($('#sAcres').value) || 0 });
+    await loadFarmer(); return;
+  }
+  if (d.addgroup) {
+    await api('POST', `/farm/${S.farm._id}/groups`, { species: d.addgroup, label: d.addgroup, count: 6 });
+    await loadFarmer(); return;
+  }
+  if (d.addcrop) {
+    await api('POST', `/farm/${S.farm._id}/crops`, { crop: d.addcrop, acres: 2, plantedOn: new Date().toISOString(), season: 'short rains' });
+    await loadFarmer(); return;
+  }
+
+  // the daily loop
+  if (d.complete) {
+    const r = await api('POST', `/farm/${S.farm._id}/events/${d.complete}/complete`, {});
+    if (r.body?.ok) {
+      const h = (r.body.holds || []).map((x) => x.affects.join('/')).join(', ');
+      $('#logOut').textContent = h
+        ? `✓ Imerekodiwa. Usiuze: ${h} kwa siku ${(r.body.holds[0] || {}).days}.`
+        : '✓ Imerekodiwa.';
+      await loadFarmer();
+    }
+    return;
+  }
+  if (d.log) {
+    const map = { milk: { kind: 'milk', product: 'milk', quantity: 42, unit: 'litre' },
+                  eggs: { kind: 'eggs', product: 'eggs', quantity: 12, unit: 'tray' },
+                  maize: { kind: 'harvest', product: 'maize', quantity: 200, unit: 'cob' },
+                  deworm: { kind: 'treatment', product: 'Dewormer', quantity: 0, withdrawalDays: 3, affects: ['milk'], subjectLabel: 'the herd' } };
+    const r = await api('POST', `/farm/${S.farm._id}/logs`, { log: { ...map[d.log], clientId: 'c' + Date.now() } });
+    if (r.body?.ok) {
+      const av = r.body.availability || [];
+      const shown = av.slice(0, 3).map((a) => `${a.label}: ${a.suppressed ? 'imezuiwa' : a.qty + ' ' + a.unit}`).join(' · ');
+      $('#logOut').textContent = '✓ ' + shown;
+      await loadFarmer();
+    }
+    return;
+  }
+
+  // money
+  if (b.id === 'modeZU' || b.id === 'modeMP') {
+    const mode = b.id === 'modeZU' ? 'virtual' : 'mpesa';
+    const r = await api('POST', `/farm/${S.farm._id}/money/mode`, { mode });
+    if (!r.body?.ok) $('#moneyNote').textContent = r.body?.error || 'Imeshindwa';
+    await loadMoney(); return;
+  }
+  if (b.id === 'btnShopLink') {
+    // The share link is THE distribution mechanism — it must never hardcode the
+    // mount path. Derived from where the app is actually being served.
+    const url = location.origin + appBase() + 's/' + S.farm.slug;
+    try { await navigator.clipboard.writeText(url); $('#logOut').textContent = '✓ Kiungo kimenakiliwa: ' + url; }
+    catch { $('#logOut').textContent = url; }
+    return;
+  }
+  if (d.advance) { await api('POST', `/farm/${S.farm._id}/orders/${d.advance}/stage`, { stage: Number(d.stage) }); await loadFarmer(); return; }
+  if (d.accept) { await api('POST', `/farm/${S.farm._id}/ladder/accept`, { rung: ladderId(Number(d.accept)) }); await loadFarmer(); await loadLadder(); return; }
+
+  // shop
+  if (d.inc) { const it = S.shop.availability.find((x) => x.product === d.inc); S.cart[d.inc] = Math.min(it.qty, (S.cart[d.inc] || 0) + 1); renderShopList(); return; }
+  if (d.dec) { S.cart[d.dec] = Math.max(0, (S.cart[d.dec] || 0) - 1); if (!S.cart[d.dec]) delete S.cart[d.dec]; renderShopList(); return; }
+  if (b.id === 'btnCartGo') { renderCheckout(); return show('checkout'); }
+  if (b.id === 'howPickup' || b.id === 'howDelivery') { S.how = b.id === 'howPickup' ? 'pickup' : 'delivery'; renderCheckout(); return; }
+  if (b.id === 'btnCustomer') {
+    const phone = prompt('Namba ya simu'); if (!phone) return;
+    await api('POST', '/auth/customer', { phone, name: '', slug: S.shop?.farm?.slug });
+    S.token = null; S.kind = 'customer';  // shop is open; a token is only needed to order
+    $('#logOut').textContent = '✓ Umeingia kama mteja';
+    return;
+  }
+  if (b.id === 'btnPay') {
+    const r = await api('POST', `/shop/${S.shop.farm.slug}/order`, {
+      lines: cartLines().map((l) => ({ product: l.product, qty: l.qty })),
+      how: S.how, slot: $('#coSlot').value, addr: $('#coAddr').value, note: $('#coNote').value, pay: true,
+    });
+    if (!r.body?.ok) { $('#coMode').textContent = '⚠ ' + (r.body?.error || 'Imeshindwa'); return; }
+    S.order = r.body.order; S.cart = {}; renderState(); return show('state');
+  }
+  if (b.id === 'btnTrack') { if (S.order) { renderState(); return show('state'); } return; }
+});
+
+function ladderId(rung) {
+  const all = [...(S.ladder?.foundation || []), ...(S.ladder?.commercial || [])];
+  const match = all.find((x) => x.rung === rung);
+  return ['farm', 'record', 'sharpen', 'verdict', 'plan', 'operate', 'commerce'][rung] || (match && match.name);
+}
+
+async function refresh() {
+  if (S.token && S.kind === 'farmer') { await loadFarmer(); show(S.view === 'auth' ? 'farmer' : S.view); }
+  else if (S.view === 'shop') { await loadShop(); }
+}
+
+// ── boot: a farm deeplink is /farmline/s/<slug> ────────────────────────────────
+(async function boot() {
+  const m = location.pathname.match(/\/s\/([^/?#]+)/);
+  if (m) { await loadShop(m[1]); return show('shop'); }
+  show('auth');
+})();
+</script>
+</body>
+</html>

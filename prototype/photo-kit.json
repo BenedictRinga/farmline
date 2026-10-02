@@ -1,0 +1,213 @@
+{
+  "$comment": "farmline Photo Kit v0.1 — the guided farm photography prompts. Airbnb's Professional Photography Program was their single biggest early growth lever: listings with good photos booked, listings without them didn't. This is that, delivered in-app, for free, on a phone the farmer already owns. Photos are not decoration here — they ARE the storefront and the primary trust artifact.",
+  "principles": [
+    "Natural daylight only. Never flash. Shoot within two hours of sunrise or before sunset.",
+    "No people in the listing photos unless the farmer chooses to appear — the FARM is the brand.",
+    "One clear subject per shot. Get close. Fill the frame.",
+    "Shoot in landscape AND portrait for the hero; portrait only for produce.",
+    "Never stage produce the farmer wouldn't actually sell.",
+    "Re-shoot the hero every season — a farm photo from three years ago reads as neglect.",
+    "If the feed trough is dirty, fix the trough. Do not fix the photo."
+  ],
+  "shots": [
+    {
+      "id": "hero-gate",
+      "purpose": "Farm profile hero image",
+      "tier": "required",
+      "use": "Top of the shop, receipt footer, WhatsApp share card",
+      "prompt": {
+        "sw": "Piga picha ya lango la shamba, asubuhi, ukielekea ndani.",
+        "en": "Show me the farm gate, in the morning, looking in."
+      },
+      "why": {
+        "sw": "Hii ni picha ya kwanza mteja anaiona. Inajenga uaminifu mara moja.",
+        "en": "This is the first thing a customer sees. It sets trust immediately."
+      },
+      "framing": "Stand 3 m back. Include the gate, a piece of the path, and some sky. Hold the phone level — the horizon should be flat.",
+      "avoid": "Dust glare, blurred gate, a person's back filling the frame",
+      "resize": "1600x900 landscape + 900x1200 portrait"
+    },
+    {
+      "id": "hero-shamba",
+      "purpose": "Farm profile hero (alternate)",
+      "tier": "required",
+      "use": "Profile gallery, seasonal refresh",
+      "prompt": {
+        "sw": "Onyesha shamba lako kwa ujumla — sehemu kubwa ya mazao.",
+        "en": "Stand in your main plot and show the whole crop."
+      },
+      "why": {
+        "sw": "Mteja anataka kuona kwamba kuna shamba halisi, si kibanda cha kununua.",
+        "en": "Customers want proof of a real farm, not a reseller."
+      },
+      "framing": "Wide. Include the crop rows leading away from you. Fill the lower two-thirds with crop, not sky.",
+      "avoid": "Empty ground, a single plant filling the frame",
+      "resize": "1600x900"
+    },
+    {
+      "id": "product-milk",
+      "purpose": "Listing photo — fresh milk",
+      "tier": "required",
+      "use": "Listing card in 'Available today'",
+      "prompt": {
+        "sw": "Piga picha ya chupa au ndoo ya maziwa, na ng'ombe nyuma kidogo.",
+        "en": "Show the milk in a clean container, with the cow slightly behind it."
+      },
+      "why": {
+        "sw": "Inaonyesha maziwa yanatoka wapi. Inauza zaidi kuliko picha ya chupa peke yake.",
+        "en": "It shows where the milk came from. It sells far better than a container alone."
+      },
+      "framing": "Hold the container at chest height. Let the animal be soft in the background.",
+      "avoid": "A dirty container. Rusty metal. Anything that looks unwashed.",
+      "resize": "1200x1200 square"
+    },
+    {
+      "id": "product-eggs",
+      "purpose": "Listing photo — eggs",
+      "tier": "required",
+      "use": "Listing card",
+      "prompt": {
+        "sw": "Onyesha tray ya mayai, mabichi na masafi.",
+        "en": "Show a full tray of eggs, clean and unbroken."
+      },
+      "why": {
+        "sw": "Mteja anajua ubora kwa kuangalia. Mayai yaliyovunjika yanaua oda.",
+        "en": "Quality is visible. One cracked egg kills the order."
+      },
+      "framing": "Top-down. Whole tray in frame. No gaps.",
+      "avoid": "Cracked, dirty, or missing eggs",
+      "resize": "1200x1200"
+    },
+    {
+      "id": "product-goat",
+      "purpose": "Listing photo — livestock for sale",
+      "tier": "required",
+      "use": "Listing card, price enquiry",
+      "prompt": {
+        "sw": "Piga picha ya mbuzi anatembea, ukiwa kando yake — si juu yake.",
+        "en": "Photograph the goat standing, from the side, not from above."
+      },
+      "why": {
+        "sw": "Ubora wa mbuzi unaonekana kwa mwili mzima. Mteja anajua anataka nini.",
+        "en": "The animal's condition is the product. A side view shows it fully."
+      },
+      "framing": "Side-on, all four legs visible, head up. Whole animal in frame with a little space above the horns.",
+      "avoid": "Top-down shots, partial animal, only the head",
+      "resize": "1200x1200"
+    },
+    {
+      "id": "product-maize",
+      "purpose": "Listing photo — fresh maize",
+      "tier": "required",
+      "use": "Listing card",
+      "prompt": {
+        "sw": "Onyesha mahindi yaliyovunwa, na tano bichi.",
+        "en": "Show the harvested cobs you have, and peel back one."
+      },
+      "why": {
+        "sw": "Kufunua moja kunaonyesha ndani iko aje — hio ndio inauza.",
+        "en": "Peeling one open shows what's inside. That's what sells it."
+      },
+      "framing": "Three-quarter view, cobs facing camera. Peeled one at the front.",
+      "avoid": "Dried-out or mouldy cobs in frame",
+      "resize": "1200x1200"
+    },
+    {
+      "id": "trust-hygiene",
+      "purpose": "Trust — food safety proof",
+      "tier": "recommended",
+      "use": "Shown on the profile near the Compliance Score",
+      "prompt": {
+        "sw": "Piga picha ya mahali unaposafisha na kupanga maziwa au mayai.",
+        "en": "Show where you wash and pack the milk or eggs."
+      },
+      "why": {
+        "sw": "Wateja wanaogopa uchafu kuliko kitu kingine. Picha safi inaondoa hofu.",
+        "en": "Customers fear uncleanliness above everything else. One clean photo removes the fear."
+      },
+      "framing": "Clean surface, clean containers, natural light. Wide enough to show the space.",
+      "avoid": "Clutter, dirty cloths, animals inside the packing area",
+      "resize": "1200x900"
+    },
+    {
+      "id": "trust-animals-healthy",
+      "purpose": "Trust — animal welfare",
+      "tier": "recommended",
+      "use": "Profile gallery",
+      "prompt": {
+        "sw": "Onyesha ng'ombe au mbuzi wako wakiwa wazima, wakila.",
+        "en": "Show your cattle or goats healthy and feeding."
+      },
+      "why": {
+        "sw": "Wanyama wanaofanya vizuri wanaonyesha shamba linajaliwa.",
+        "en": "Thriving animals signal a well-run farm."
+      },
+      "framing": "Eye-level with the animals. Show condition, not just heads.",
+      "avoid": "Emaciated animals (do not hide them either — fix the cause)",
+      "resize": "1200x900"
+    },
+    {
+      "id": "trust-farmer-at-work",
+      "purpose": "Trust — the human behind the food",
+      "tier": "optional",
+      "use": "Profile 'about' section",
+      "prompt": {
+        "sw": "Kama uko tayari, onyesha mikono yako ikifanya kazi — kupanda, kukama, au kuvuna.",
+        "en": "If you're willing, show your hands at work — planting, milking, or harvesting."
+      },
+      "why": {
+        "sw": "Mteja ananunua kwa mtu, si kwa kampuni. Uso au mikono inaunganisha.",
+        "en": "People buy from a person, not a company. A face or hands creates the connection."
+      },
+      "framing": "Hands and action in focus. Face optional — the farmer's choice, always.",
+      "avoid": "Anything the farmer is not comfortable publishing. Consent is absolute here.",
+      "resize": "1200x900"
+    },
+    {
+      "id": "trust-feed-water",
+      "purpose": "Trust — feed and water quality",
+      "tier": "optional",
+      "use": "Profile gallery, fodder listings later",
+      "prompt": {
+        "sw": "Onyesha malisho na maji safi unayowapa wanyama.",
+        "en": "Show the feed and clean water you give the animals."
+      },
+      "why": {
+        "sw": "Mteja anayeuliza 'wanakula nini?' atapata jibu bila kukuuliza.",
+        "en": "The customer who wonders 'what are they fed?' gets the answer without asking."
+      },
+      "framing": "Close, clean, well-lit. Feed trough filled, not scattered on the ground.",
+      "avoid": "Mouldy feed, stagnant water, dirty troughs",
+      "resize": "1200x900"
+    }
+  ],
+  "capture_ux": {
+    "entry": "Offered at the end of farm setup, and again when a listing is created without a photo.",
+    "framing_guide": "Draw a live rule-of-thirds overlay with a horizon lock. Warn if tilted more than 3 degrees.",
+    "light_check": "Warn if the shot is backlit (subject darker than background) or taken after 6pm.",
+    "data_rule": "Compress on-device to under 120 KB before upload. Never upload a raw 4 MB phone photo over mobile data.",
+    "offline_rule": "Queue photos locally and upload when on wifi or when the farmer chooses. Never block logging on an upload.",
+    "minimum_viable": "Hero gate + one photo per listing. A farm can go live with four photos.",
+    "resize_targets": {
+      "hero": "1600x900 landscape, 900x1200 portrait",
+      "listing": "1200x1200 square",
+      "gallery": "1200x900"
+    }
+  },
+  "first_cohort_service": {
+    "$comment": "Airbnb sent photographers to hosts' homes. For the first five design-partner farms, do the same thing manually: one visit, a half-day, shooting the whole kit. It is the cheapest possible growth lever and it produces the reference images every later farmer is measured against.",
+    "plan": [
+      "One half-day visit per design-partner farm, golden hour where possible.",
+      "Shoot the full required set plus the recommended trust shots.",
+      "Deliver as a ready-to-use profile gallery, then show the farmer the before/after.",
+      "Use the same five farms' shoots to train the in-app framing prompts.",
+      "Offer the service to the next cohort at cost, or as a Rung 3 incentive."
+    ]
+  },
+  "consent_rules": [
+    "Any photo containing a person requires that person's explicit in-app consent before publishing.",
+    "Children must never appear in customer-facing photos.",
+    "The farmer may delete any photo at any time; deletion is immediate and complete from the customer face.",
+    "No photo may be used by farmline for marketing without a separate, explicit opt-in."
+  ]
+}
