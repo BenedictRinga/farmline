@@ -68,6 +68,12 @@ const config = {
   mongoUri: resolveMongoUri(),
   isProduction: envVar('NODE_ENV', 'development') === 'production',
 
+  // WHICH ENVIRONMENT IS THIS? Dev and production both serve the SAME public path
+  // (/farmline/), so without this the app cannot tell a farmer's live farm from a
+  // debugging session on a laptop. `ENV_NAME` lets staging announce itself; it
+  // defaults to NODE_ENV so nothing has to be configured for dev to be honest.
+  envName: envVar('ENV_NAME', envVar('NODE_ENV', 'development')),
+
   // ── MONEY (AGENTS.md rule 2) ──────────────────────────────────────────────
   // 'virtual' = ZU (Zyppar Units, 1 ZU ≈ $0.01)   'mpesa' = real money
   // Per-farm override lives on the Farm document; this is only the default.

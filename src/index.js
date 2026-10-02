@@ -57,7 +57,16 @@ const slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')
 app.get(['/health', config.basePath + '/health'], (_req, res) => res.json(healthPayload()));
 app.get('/api/farmline/version', (_req, res) => {
   const b = Number(require('../package.json').build) || 0;
-  res.json({ version: '0.1.' + b, build: b, at: new Date().toISOString() });
+  res.json({
+    version: '0.1.' + b,
+    build: b,
+    // The app reads this to say which environment it is running against. Dev and
+    // production share the same public path, so this is the only honest signal.
+    env: config.envName,
+    isProduction: config.isProduction,
+    dbName: config.dbName,
+    at: new Date().toISOString(),
+  });
 });
 
 // THE HEALTH ENDPOINT UNDER OUR OWN PREFIX.

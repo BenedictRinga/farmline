@@ -145,13 +145,20 @@ label{display:block;font-size:14px;font-weight:600;margin-bottom:var(--s1);margi
 .offline{background:#FDF1F0;border:1px solid color-mix(in srgb,var(--alert) 30%,transparent);color:#7a1b16;
   border-radius:var(--r-md);padding:var(--s3);font-size:13.5px;margin-bottom:var(--s4)}
 footer{padding:var(--s6) var(--s4) var(--s12);color:var(--text-tertiary);font-size:12.5px}
+/* The environment tell. Only ever rendered when the server is NOT production —
+   there is no way to show it on a live farm by accident. */
+#envBadge{position:fixed;left:var(--s3);bottom:calc(var(--s3) + env(safe-area-inset-bottom));z-index:60;
+  background:#B4691F;color:#fff;font-size:11px;font-weight:700;letter-spacing:.05em;
+  padding:4px var(--s2);border-radius:var(--r-sm);opacity:.92;pointer-events:none;
+  font-variant-numeric:tabular-nums;max-width:calc(100vw - 2 * var(--s3));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
 </style>
-  <meta name="farmline-build" content="5">
-  <meta name="farmline-version" content="0.1.4">
-  <meta name="farmline-commit" content="3b81fb3">
+  <meta name="farmline-build" content="6">
+  <meta name="farmline-version" content="0.1.5">
+  <meta name="farmline-commit" content="d472f93">
 </head>
 <body>
+<div id="envBadge" class="hide" role="status" aria-live="polite"></div>
 <div class="wrap">
   <div class="topbar">
     <span class="brand">farmline</span>
@@ -909,12 +916,28 @@ async function refresh() {
 // worse than a stale shell, especially on a metered connection.
 const SHELL_BUILD = (document.querySelector('meta[name="farmline-build"]') || {}).content || '';
 async function guardStaleShell() {
-  if (!SHELL_BUILD) return;               // unstamped build: nothing to compare
   try {
     const r = await fetch(API + '/version', { cache: 'no-store' });
     const j = await r.json();
     if (!j || !j.build) return;
-    if (String(j.build) !== String(SHELL_BUILD)) {
+
+    // ANNOUNCE THE ENVIRONMENT. Dev and production serve the IDENTICAL public path
+    // (/farmline/), so nothing on screen would otherwise tell you which one you are
+    // looking at — and "I edited dev, why is prod unchanged?" is a whole class of
+    // wasted hour. Anything that is not production says so, in the corner.
+    if (j.isProduction !== true) {
+      const b = document.getElementById('envBadge');
+      if (b) {
+        b.textContent = (j.env || 'dev').toUpperCase() + ' · ' + (j.dbName || '') + ' · build ' + j.build;
+        b.classList.remove('hide');
+      }
+    }
+
+    // Stale-shell self-heal. Only when the shell carries a stamp AND the SERVER HAS
+    // MOVED PAST it. The reverse — a freshly stamped shell against an older running
+    // server — is the normal DEV situation (you edited the app, you have not
+    // restarted yet), and healing there would be a pointless reload on every edit.
+    if (SHELL_BUILD && Number(j.build) > Number(SHELL_BUILD)) {
       const key = 'farmline-healed-for-' + j.build;
       if (!sessionStorage.getItem(key)) {
         sessionStorage.setItem(key, '1');

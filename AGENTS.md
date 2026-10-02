@@ -13,6 +13,62 @@ Mirrors the LoopKeeper (`rolodex-server`) conventions deliberately. Read this be
 - **Dependencies stay at two** (express, mongoose). Anything else needs the founder's explicit approval.
   The frontend is a single static HTML file with zero dependencies — keep it that way.
 
+## DEV — how the two faces are run locally
+
+**farmline is ONE process, not two.** LoopKeeper splits the app (`rolodex-app`, `ng serve` on
+:4400) from the server (`rolodex-server`, :4411), because it is an Angular build with a compile
+step. farmline has no build step: the Node process serves `public/index.html` itself, so the app
+and the API are the **same origin on the same port**. There is no second dev server to start and
+no CORS to configure.
+
+```bash
+yarn dev          # :4600, nodemon-style watch on src/
+                  # then open  http://localhost:4600/farmline/
+yarn seed         # fills a farm so you are not debugging an empty one
+```
+
+| | LoopKeeper | farmline |
+|---|---|---|
+| App dev server | `yarn start` in `rolodex-app` → :4400 | none — served by the server |
+| API server | `yarn start` in `rolodex-server` → :4411 | `yarn dev` → :4600 |
+| Dev API target | **the LIVE production API** (`environment.ts` → `zyppar.com/api/loopkeeper`) | **local** mongod, local `farmline` db |
+| Cross-origin? | yes (4400 → 4411), hence the ACAO rule | no — same origin |
+
+**farmline's dev is isolated; LoopKeeper's is not.** Running `rolodex-app` in dev writes to the
+live LoopKeeper database. Running farmline in dev touches nothing outside your machine. This is
+the reason to keep the single-process shape: **debugging can never damage a farmer's records.**
+
+Ports are fixed: **4600 dev** (4200, 4400, 4411 are taken). `yarn smoke` uses **4699**, so it never
+fights a dev server.
+
+### Knowing which environment you are looking at
+
+Dev and production serve the **same public path** (`/farmline/`), so the app says which one it is.
+Any non-production server renders an amber badge in the bottom-left with the env, database and
+build:
+
+```
+DEVELOPMENT · farmline · build 6
+```
+
+The badge is driven by `GET /api/farmline/version` → `{ env, isProduction, dbName, build }`. It
+**cannot** appear on production: it only renders when `isProduction !== true`. `yarn seed` refuses
+to run against a target that reports `isProduction: true`, so you cannot accidentally fill a live
+farm with debug animals.
+
+Set `ENV_NAME=staging` to label a staging box distinctly from `development`.
+
+### What `yarn seed` gives you
+
+A farm already a week into its life, created **through the real API** (so if seeding breaks, the
+app is broken): 2 plots · 6 dairy cattle, 4 goats, 20 layers · 2 acres of maize planted 35 days
+ago · 3 days of milk and egg records · milk at KES 60/litre and eggs at KES 450/tray · **a
+withdrawal hold** (it completes a deworm deliberately — a tick spray carries no withdrawal and
+would demonstrate nothing) · and a customer order waiting.
+
+It prints the shop URL and the sign-in phone/PIN. Re-runnable; `SEED_PHONE` / `SEED_FARM` make
+additional farms.
+
 ## The script suite — how this repo is automated
 
 Modelled on LoopKeeper's chained `scripts/*.cjs` pipeline. farmline has no bundler, so `build`
