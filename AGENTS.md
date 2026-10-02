@@ -4,12 +4,42 @@ Mirrors the LoopKeeper (`rolodex-server`) conventions deliberately. Read this be
 
 ## Repo rules
 - **YARN ONLY.** Never use npm here.
-- Before committing: `yarn check` (runs `node --check src/index.js`).
-- Bump `package.json` `build` counter with every user-visible backend change.
+- The full gate before committing: `yarn release` (= `check` → `build` → `smoke`).
+- Bump `package.json` `build` counter with every user-visible backend change. `yarn build`
+  stamps the new number into `public/index.html` — the app self-heals a stale cache from it.
 - The server talks to its **own `farmline` Mongo database**. **Never touch the `zyppar` or `rolodex` databases.**
+  `yarn preflight` fails the run if the URI points anywhere else.
 - Plain CommonJS. No TypeScript, no build step, no bundler.
 - **Dependencies stay at two** (express, mongoose). Anything else needs the founder's explicit approval.
   The frontend is a single static HTML file with zero dependencies — keep it that way.
+
+## The script suite — how this repo is automated
+
+Modelled on LoopKeeper's chained `scripts/*.cjs` pipeline. farmline has no bundler, so `build`
+produces a **stamp** rather than compiled output — that is the whole difference.
+
+| Script | Does | Run when |
+|---|---|---|
+| `yarn preflight` | Is this machine able to run farmline? Fails loudly on an unset `AUTH_SECRET` on a prod host, a local-mongo URI on a droplet, a Mongo db name that is not `farmline`, a taken port, an external CDN in the shell. | Before starting, and on the droplet before deploying |
+| `yarn check` | `node --check` over every source and script file | Every commit |
+| `yarn build` | Writes `public/build.json` + stamps `farmline-build`/`-version`/`-commit` meta into `public/index.html`. Idempotent. | Every commit that changes the shell |
+| `yarn smoke` | Boots a throwaway server on port **4699**, runs the 67-check suite against it, shuts it down. Refuses to run if 4699 is busy. | Every commit |
+| `yarn test` | The suite alone, against `FARMLINE_TEST_BASE` (default `:4600`) | Debugging |
+| `yarn verify [url]` | Verifies a **deployed** farmline over HTTPS: `/api/farmline/version` returns JSON (not the shell), deploy-drift, real-404 on a missing API path, shell not cached, the share deeplink, and that LoopKeeper is untouched. | After every deploy |
+| `yarn release` | `check` → `build` → `smoke` | The gate |
+| `./deploy.sh` | The droplet deploy | On the droplet |
+
+**Why `smoke` uses its own port:** three times during the build, a stale server on 4600 answered with
+OLD code and made a correct fix look broken. A script cannot forget to kill the previous process.
+
+**Why the shell is never cached, in TWO places:** nginx pins `/farmline/index.html` to `no-cache`, and
+`src/index.js` sets the same header itself. An app that depends on a proxy to keep it honest breaks the
+moment the proxy is missing or drifts (staging, a direct `:4600` hit, a future ingress). The app states
+its own rule.
+
+**Why `/health` is namespaced:** farmline exposes `/api/farmline/health`, not `/health`. A root-level
+path belongs to whoever serves zyppar.com; claiming one is ambiguous today and a collision tomorrow.
+`/health` still answers for direct localhost use, which is what `deploy.sh` checks.
 
 ## The two standing product rules — these outrank feature requests
 

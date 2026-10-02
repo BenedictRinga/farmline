@@ -147,6 +147,9 @@ label{display:block;font-size:14px;font-weight:600;margin-bottom:var(--s1);margi
 footer{padding:var(--s6) var(--s4) var(--s12);color:var(--text-tertiary);font-size:12.5px}
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
 </style>
+  <meta name="farmline-build" content="4">
+  <meta name="farmline-version" content="0.1.3">
+  <meta name="farmline-commit" content="ea5d7c6">
 </head>
 <body>
 <div class="wrap">
@@ -734,11 +737,44 @@ async function refresh() {
   else if (S.view === 'shop') { await loadShop(); }
 }
 
+// ── STALE-SHELL GUARD ─────────────────────────────────────────────────────────
+// nginx pins this shell to no-cache, but a phone that has been backgrounded can
+// still resume with what it already had — which is precisely the pattern behind
+// LoopKeeper's five-day crash ("it often happens after it becomes visible again
+// after a few minutes gap").
+//
+// The shell knows the build it was stamped with (scripts/write-build.cjs); the
+// server reports its own build. If they disagree, the farmer is holding an app
+// that no longer matches the API. Reload ONCE, then stop — a reload loop would be
+// worse than a stale shell, especially on a metered connection.
+const SHELL_BUILD = (document.querySelector('meta[name="farmline-build"]') || {}).content || '';
+async function guardStaleShell() {
+  if (!SHELL_BUILD) return;               // unstamped build: nothing to compare
+  try {
+    const r = await fetch(API + '/version', { cache: 'no-store' });
+    const j = await r.json();
+    if (!j || !j.build) return;
+    if (String(j.build) !== String(SHELL_BUILD)) {
+      const key = 'farmline-healed-for-' + j.build;
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        location.reload();
+      }
+    }
+  } catch { /* offline: the shell is all we have, and that is correct */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) guardStaleShell(); });
+
 // ── boot: a farm deeplink is /farmline/s/<slug> ────────────────────────────────
 (async function boot() {
   const m = location.pathname.match(/\/s\/([^/?#]+)/);
-  if (m) { await loadShop(m[1]); return show('shop'); }
+  if (m) {
+    guardStaleShell();
+    await loadShop(m[1]);
+    return show('shop');
+  }
   show('auth');
+  guardStaleShell();
 })();
 </script>
 </body>

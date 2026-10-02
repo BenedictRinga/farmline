@@ -54,7 +54,21 @@ const slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')
 // ══════════════════════════════════════════════════════════════════════════════
 // HEALTH / VERSION
 // ──────────────────────────────────────────────────────────────────────────────
-app.get(['/health', config.basePath + '/health'], (_req, res) => res.json({
+app.get(['/health', config.basePath + '/health'], (_req, res) => res.json(healthPayload()));
+app.get('/api/farmline/version', (_req, res) => {
+  const b = Number(require('../package.json').build) || 0;
+  res.json({ version: '0.1.' + b, build: b, at: new Date().toISOString() });
+});
+
+// THE HEALTH ENDPOINT UNDER OUR OWN PREFIX.
+// `/health` at the ROOT belongs to whoever serves zyppar.com — not to us. A tenant
+// must never claim a root-level path: it is ambiguous today and a collision
+// tomorrow (the Zyppar backend may want /health itself). farmline therefore
+// exposes its health at /api/farmline/health, which the nginx API block already
+// proxies and which can never be confused with a neighbour's route.
+// `/health` is still served for DIRECT localhost use (deploy.sh checks it before
+// nginx is in the picture) — but verify-live.cjs checks THIS one.
+const healthPayload = () => ({
   ok: true,
   db: conn.readyState === 1 ? 'connected' : 'connecting',
   dbName: config.dbName,
@@ -62,12 +76,10 @@ app.get(['/health', config.basePath + '/health'], (_req, res) => res.json({
   moneyMode: config.moneyMode,
   mpesaConfigured: money.mpesaConfigured(),
   basePath: config.basePath,
+  build: Number(require('../package.json').build) || 0,
   at: new Date().toISOString(),
-}));
-app.get('/api/farmline/version', (_req, res) => {
-  const b = Number(require('../package.json').build) || 0;
-  res.json({ version: '0.1.' + b, build: b, at: new Date().toISOString() });
 });
+api.get('/health', (_req, res) => res.json(healthPayload()));
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH — two principals
@@ -515,7 +527,31 @@ app.use(config.apiPrefix, api);
 // STATIC APP — served at BASE_PATH (zyppar.com/farmline/)
 // ──────────────────────────────────────────────────────────────────────────────
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-app.use(config.basePath, express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: '1h' }));
+
+// CACHE HEADERS BY ROLE — the app-side half of the LoopKeeper lesson.
+//
+// The nginx insert pins /farmline/index.html to no-cache, and that is correct.
+// But an application that relies on a proxy to keep it honest breaks the moment
+// the proxy is missing or drifts — a staging box, a direct :4600 hit, a phone
+// wrapper, a future ingress. `maxAge: '1h'` on the HTML was a real defect: it
+// let a farmer hold an app shell for an hour that no longer matched the API.
+//
+// So the app states the rule itself: the SHELL is never cached; the version
+// stamp is never cached; everything else (there is almost nothing else) may be.
+app.use(config.basePath, express.static(PUBLIC_DIR, {
+  extensions: ['html'],
+  etag: true,
+  lastModified: true,
+  setHeaders(res, filePath) {
+    if (/index\.html$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (/build\.json$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+  },
+}));
 // A shop deeplink is the farm's own URL: /farmline/s/<slug>
 app.get(config.basePath + '/s/:slug', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 app.get(config.basePath, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));

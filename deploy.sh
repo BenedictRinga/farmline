@@ -59,26 +59,6 @@ if [ ! -f .env ]; then
   cp .env.example .env
 fi
 
-# AUTH_SECRET is the one that matters most: unset, the write gate FAILS OPEN.
-if ! grep -q "^AUTH_SECRET=.\+" .env 2>/dev/null; then
-  echo "  ⚠  AUTH_SECRET is NOT set — THE WRITE GATE IS OPEN."
-  echo "     Every farm write is unauthenticated until you set it:"
-  echo "       node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
-  echo "       then add AUTH_SECRET=<value> to .env and re-run this script."
-fi
-if ! grep -q "^FARMLINE_ADMIN_KEY=.\+" .env 2>/dev/null; then
-  echo "  ⚠  FARMLINE_ADMIN_KEY not set — /api/farmline/admin/* answers 403 (door sealed, never open)."
-fi
-if ! grep -q "^MONEY_MODE=" .env 2>/dev/null; then
-  echo "  ⚠  MONEY_MODE not set — defaulting to virtual (ZU). Safe: no real money moves."
-fi
-if ! grep -q "^MPESA_CONSUMER_KEY=.\+" .env 2>/dev/null; then
-  echo "  NOTE: M-Pesa is not armed. That is FINE for the first farmer — the farm runs in"
-  echo "        ZU (virtual) mode, so they and their customers can order and get paid in"
-  echo "        practice before any real shilling moves. The rail reports itself unarmed"
-  echo "        rather than faking a success. Add MPESA_* when the farmer is ready for real money."
-fi
-
 # The Mongo target: farmline owns its OWN database, on the same paid cluster.
 if ! grep -qE "^(MONGO_DB_URI_FARMLINE|MONGO_LOCAL_URI|FARMLINE_USE_LOCAL_MONGO)=" .env 2>/dev/null; then
   if [ -f /opt/zyppar-server/.env ] && grep -q "MONGO_DB_URI_PAID=" /opt/zyppar-server/.env; then
@@ -89,11 +69,18 @@ if ! grep -qE "^(MONGO_DB_URI_FARMLINE|MONGO_LOCAL_URI|FARMLINE_USE_LOCAL_MONGO)
     echo "     Set MONGO_DB_URI_FARMLINE in $DEPLOY_DIR/.env"
   fi
 fi
-if ! grep -q "^FARMLINE_USE_LOCAL_MONGO=false" .env 2>/dev/null; then
-  echo "  NOTE: FARMLINE_USE_LOCAL_MONGO is not 'false'. On a droplet that means the server"
-  echo "        will look for a LOCAL mongod, which is not running there. Set:"
-  echo "          FARMLINE_USE_LOCAL_MONGO=false"
-fi
+
+# The environment reasoning lives in ONE place now: scripts/preflight.cjs. It
+# succeeds or fails the deploy on the things that would otherwise fail silently
+# (the write gate open, a local-mongo URI on a droplet, a db name that is not
+# `farmline`). FARMLINE_PROD=1 makes the missing-secret cases FATAL, which they
+# should be here and are not on a laptop.
+echo "      running preflight (FARMLINE_PROD=1) …"
+FARMLINE_PROD=1 yarn preflight || {
+  echo
+  echo "  ✗ PREFLIGHT FAILED — not restarting. Fix the FATAL lines above, then re-run ./deploy.sh"
+  exit 1
+}
 
 echo "6/7  restarting via pm2…"
 pm2 restart "$PM2_NAME" --update-env 2>/dev/null || pm2 start src/index.js --name "$PM2_NAME"
@@ -111,15 +98,27 @@ else
   exit 1
 fi
 
+echo "── verification ──"
+# The live check, as a script. It answers the only question that matters after a
+# deploy — "did it actually take?" — by comparing the live build number to this
+# repo's, and by proving the API prefix is proxied rather than silently answered
+# by the frontend shell at HTTP 200.
+PUBLIC_BASE="${FARMLINE_PUBLIC_BASE:-https://zyppar.com}"
+if yarn verify "$PUBLIC_BASE"; then
+  echo
+  echo "  ✓ deployed and verified: $PUBLIC_BASE/farmline/"
+else
+  echo
+  echo "  ⚠ THE DEPLOY IS UP BUT VERIFICATION FAILED — read the FAIL lines above."
+  echo "    A common cause is deploy drift: the droplet is serving an older build than"
+  echo "    the one just released. Check: pm2 logs $PM2_NAME"
+fi
+
 cat <<'EOF'
 
-── nginx reminder ────────────────────────────────────────────────
-The inserts live in deploy/nginx-farmline-path.conf. If they are not applied,
-the app is reachable on :4600 but NOT at https://zyppar.com/farmline/ — and the
-API path will answer HTTP 200 with the frontend shell instead of JSON, which
-looks like success and is not. Verify from the droplet:
-
-  curl -s https://zyppar.com/api/farmline/version      # must be JSON
-  curl -sI https://zyppar.com/farmline/ | head -1      # must be HTTP/2 200
-  curl -s https://zyppar.com/api/loopkeeper/health     # neighbours untouched
+── if the nginx inserts are not yet applied ──────────────────────
+They live in deploy/nginx-farmline-path.conf. Without them the app is reachable
+on :4600 but NOT at /farmline/, and the API prefix answers HTTP 200 with the
+frontend shell instead of JSON — a success status for a failed call.
 EOF
+

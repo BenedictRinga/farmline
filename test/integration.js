@@ -1,7 +1,12 @@
 // Integration test for the farmline server.
 // Exercises the whole loop: farmer setup → schedule → log → projection → customer order → money.
-const BASE = 'http://localhost:4600/api/farmline';
-const APP = 'http://localhost:4600/farmline';
+//
+// The base URL is overridable so `yarn smoke` can run this against a throwaway
+// server on its own port — never against whatever happens to be listening on 4600.
+// (A stale server answering with OLD code made a correct fix look broken twice.)
+const ROOT = (process.env.FARMLINE_TEST_BASE || 'http://localhost:4600').replace(/\/$/, '');
+const BASE = ROOT + '/api/farmline';
+const APP = ROOT + '/farmline';
 
 let fail = 0;
 const ok = (m) => console.log('  PASS  ' + m);
