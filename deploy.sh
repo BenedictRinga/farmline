@@ -31,6 +31,24 @@ if [ -f .env ]; then
   ls -1t .env.backup.* 2>/dev/null | tail -n +11 | xargs -r rm -- 2>/dev/null || true
 fi
 
+# FIRST-RUN GUARD. The droplet copy was shipped as a tarball and has no `origin`
+# remote yet, so a bare `git fetch --all` would die here with a cryptic error and
+# `set -e` would abort the deploy. Say exactly what is missing and what to type.
+if ! git remote get-url origin >/dev/null 2>&1; then
+  echo
+  echo "  ✗ This checkout has NO 'origin' remote, so there is nothing to fetch."
+  echo "    That is expected on a first run (the droplet copy arrived as a tarball)."
+  echo "    Point it at the repository once, then re-run ./deploy.sh:"
+  echo
+  echo "        cd $DEPLOY_DIR"
+  echo "        git remote add origin <your-repo-url>"
+  echo "        git fetch origin"
+  echo "        git reset --hard origin/$BRANCH"
+  echo
+  echo "    After that, ./deploy.sh works normally forever."
+  exit 1
+fi
+
 echo "1/7  fetching…"
 git fetch --all --prune
 

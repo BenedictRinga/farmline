@@ -103,21 +103,44 @@ if (mode === 'mpesa') {
 
 // ── 4. database ───────────────────────────────────────────────────────────────
 console.log('\ndatabase');
+// A LOCAL mongod on the droplet is this deployment's ACTUAL architecture
+// (AGENTS.md, wiring record 2026-10-02: "its own farmline Mongo database on the
+// local mongod ... 14 collections live"). An earlier version of this script
+// treated local-mongo-on-prod as fatal, which would have blocked every deploy.
+//
+// The real question was never "local or hosted". It is: CAN WE REACH IT, and is
+// it OURS? So we probe rather than assume.
 const useLocal = (get('FARMLINE_USE_LOCAL_MONGO') || 'true') === 'true';
-if (isProd && useLocal) {
-  bad('FARMLINE_USE_LOCAL_MONGO=true on a production host — there is no local mongod on a droplet');
-} else {
-  pass(`local mongo: ${useLocal}`);
-}
-const uri = get('MONGO_DB_URI_FARMLINE') || get('MONGO_LOCAL_URI') || '(none — will derive or fail)';
+pass(`local mongo: ${useLocal}`);
+const uri = get('MONGO_DB_URI_FARMLINE') || get('MONGO_LOCAL_URI') || (useLocal ? 'mongodb://127.0.0.1:27017/farmline' : '');
 // The one invariant that must never break: farmline owns its own database.
 const dbName = (uri.match(/\/([^/?]+)(\?|$)/) || [])[1] || '';
-if (dbName && !['farmline'].includes(dbName) && !/farmline/.test(dbName)) {
+if (!uri) {
+  bad('no Mongo URI and FARMLINE_USE_LOCAL_MONGO is false — the server has nothing to connect to');
+} else if (dbName && !/farmline/.test(dbName)) {
   bad(`the URI points at database "${dbName}" — farmline must ONLY ever write to its own "farmline" db (AGENTS.md)`);
 } else if (dbName) {
   pass(`database name "${dbName}"`);
 }
-pass(`uri: ${uri.replace(/:\/\/([^:]+):[^@]+@/, '://$1:***@').slice(0, 70)}`);
+if (uri) pass(`uri: ${uri.replace(/:\/\/([^:]+):[^@]+@/, '://$1:***@').slice(0, 70)}`);
+
+// Reachability. A server that boots and then cannot reach its database serves
+// nothing, and its /health says so — better to learn that here.
+function probeMongo() {
+  return new Promise((resolve) => {
+    if (!uri) return resolve();
+    const m = uri.match(/mongodb(?:\+srv)?:\/\/(?:[^@/]*@)?([^:/,?]+)(?::(\d+))?/);
+    if (!m) return resolve();
+    const host = m[1];
+    const mport = Number(m[2] || 27017);
+    const s = net.createConnection({ host, port: mport });
+    const done = (fn) => { s.destroy(); fn(); resolve(); };
+    s.setTimeout(2500);
+    s.once('connect', () => done(() => pass(`mongod reachable at ${host}:${mport}`)));
+    s.once('timeout', () => done(() => bad(`mongod at ${host}:${mport} did not respond — the server will boot and serve nothing`)));
+    s.once('error', (e) => done(() => bad(`mongod at ${host}:${mport} unreachable (${e.code}) — is mongod running?`)));
+  });
+}
 
 // ── 5. port ───────────────────────────────────────────────────────────────────
 const port = Number(get('PORT') || 4600);
@@ -129,14 +152,20 @@ if (port === 4200 || port === 4400 || port === 4411) {
 }
 // Not fatal: a live server on the port is normal in dev. But it IS fatal for a
 // smoke test, so say who holds it rather than leaving a mystery EADDRINUSE.
-const probe = net.createServer();
-probe.once('error', (e) => {
-  if (e.code === 'EADDRINUSE') soft(`port ${port} is ALREADY IN USE — a server is running (fine for dev, fatal for \`yarn smoke\`)`);
-  else soft(`port probe: ${e.code}`);
-  probe.close(() => finish());
-});
-probe.once('listening', () => { pass(`port ${port} is free`); probe.close(() => finish()); });
-probe.listen(port);
+function probePort() {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', (e) => {
+      if (e.code === 'EADDRINUSE') soft(`port ${port} is ALREADY IN USE — a server is running (fine for dev, fatal for \`yarn smoke\`)`);
+      else soft(`port probe: ${e.code}`);
+      probe.close(() => resolve());
+    });
+    probe.once('listening', () => { pass(`port ${port} is free`); probe.close(() => resolve()); });
+    probe.listen(port);
+  });
+}
+
+probeMongo().then(probePort).then(finish);
 
 function finish() {
   console.log(`\n${fatal ? `PREFLIGHT FAILED — ${fatal} fatal, ${warn} warning(s). Do not start.` : `PREFLIGHT OK${warn ? ` — ${warn} warning(s)` : ''}.`}\n`);

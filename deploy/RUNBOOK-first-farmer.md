@@ -39,16 +39,21 @@ echo "AUTH_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toStr
 # The admin gate (roster-style). Unset = the door is sealed (403), never open.
 echo "FARMLINE_ADMIN_KEY=$(node -e "console.log(require('crypto').randomBytes(16).toString('hex'))")" >> .env
 
-# The droplet has no local mongod — point at the shared paid cluster.
-# farmline gets its OWN database: `farmline`, never `zyppar` or `rolodex`.
-sed -i 's/^FARMLINE_USE_LOCAL_MONGO=.*/FARMLINE_USE_LOCAL_MONGO=false/' .env
+# THE DATABASE: the droplet runs its OWN local mongod, and farmline uses it.
+# (Corrected 2026-10-02 — an earlier version of this runbook said the opposite,
+# and following it would have moved a live farmline off its 14-collection local
+# database and onto the shared paid cluster. Do NOT set USE_LOCAL_MONGO=false.)
+#
+# farmline still gets its OWN database NAME: `farmline`, never `zyppar`/`rolodex`.
+# The name is enforced at connect time, so a URI pointing anywhere else is refused.
+grep -q '^FARMLINE_USE_LOCAL_MONGO=' .env || echo 'FARMLINE_USE_LOCAL_MONGO=true' >> .env
 ```
 
-Then confirm the Mongo URI is present — `deploy.sh` copies `MONGO_DB_URI_PAID` from
-`/opt/zyppar-server/.env` automatically, but check it landed:
+Confirm it resolves to the local `farmline` database:
 
 ```bash
-grep -E '^(MONGO_DB_URI_PAID|MONGO_DB_URI_FARMLINE)=' .env | cut -c1-60
+node -e "console.log(require('./src/config').mongoUri)" | sed 's/:[^:@]*@/:***@/'
+# -> mongodb://localhost:27017/farmline
 ```
 
 **Leave `MONEY_MODE=virtual`.** The first farmer runs in ZU. Their customers can
