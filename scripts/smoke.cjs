@@ -72,17 +72,27 @@ function portFree() {
     stop(); process.exit(1);
   }
 
-  // The suite reads this to know where to point.
-  const test = spawn(process.execPath, [path.join(ROOT, 'test', 'integration.js')], {
-    cwd: ROOT,
-    env: { ...process.env, FARMLINE_TEST_BASE: BASE },
-    stdio: 'inherit',
+  // Two suites, in order:
+  //   1. integration.js  — does the server BEHAVE?
+  //   2. ui-contract.js  — can public/index.html READ what the server says?
+  // The second exists because a renamed field passes every server test and shows
+  // the farmer an empty screen. It already caught two such bugs.
+  const run = (file) => new Promise((resolve) => {
+    const t = spawn(process.execPath, [path.join(ROOT, 'test', file)], {
+      cwd: ROOT,
+      env: { ...process.env, FARMLINE_TEST_BASE: BASE },
+      stdio: 'inherit',
+    });
+    t.on('exit', resolve);
   });
 
-  const code = await new Promise((resolve) => test.on('exit', resolve));
+  const a = await run('integration.js');
+  const b = await run('ui-contract.js');
+  const code = (a === 0 && b === 0) ? 0 : 1;
+
   stop();
   await new Promise((r) => setTimeout(r, 300));
 
   console.log(code === 0 ? '\nSMOKE PASSED\n' : '\nSMOKE FAILED\n');
-  process.exit(code === 0 ? 0 : 1);
+  process.exit(code);
 })();

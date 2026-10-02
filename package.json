@@ -1,7 +1,7 @@
 {
   "name": "farmline-server",
-  "version": "0.1.3",
-  "build": 4,
+  "version": "0.1.4",
+  "build": 5,
   "private": true,
   "description": "farmline — farmer-first farm management, from hobby to full-time. Two faces (farmer + customer) over one record system. YARN ONLY (no npm).",
   "main": "src/index.js",

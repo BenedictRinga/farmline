@@ -147,9 +147,9 @@ label{display:block;font-size:14px;font-weight:600;margin-bottom:var(--s1);margi
 footer{padding:var(--s6) var(--s4) var(--s12);color:var(--text-tertiary);font-size:12.5px}
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
 </style>
-  <meta name="farmline-build" content="4">
-  <meta name="farmline-version" content="0.1.3">
-  <meta name="farmline-commit" content="d0672a0">
+  <meta name="farmline-build" content="5">
+  <meta name="farmline-version" content="0.1.4">
+  <meta name="farmline-commit" content="3b81fb3">
 </head>
 <body>
 <div class="wrap">
@@ -247,6 +247,32 @@ footer{padding:var(--s6) var(--s4) var(--s12);color:var(--text-tertiary);font-si
         <button class="pill" data-log="deworm">💉 Dawa ya minyoo</button>
       </div>
       <p class="tiny" id="logOut" style="margin-top:var(--s3)"></p>
+
+      <!-- ══ UZA — the farmer's own shop, authored with a PRICE ONLY ══════════
+           Without this the shop is permanently empty and there is no way for a
+           farmer to sell anything. Stock is never typed in here: it is projected
+           from the records above. The farmer sets a price; farmline works out
+           what is on the shelf. -->
+      <div class="hr"></div>
+      <h2>Uza</h2>
+      <p class="tiny">Weka bei pekee. Kilicho sokoni kinatokea kwenye rekodi zako — hupangi kitu mara mbili.</p>
+      <div id="sellList" style="margin-top:var(--s3)"></div>
+      <div class="card tint" style="margin-top:var(--s3)">
+        <label for="sellProduct">Bidhaa</label>
+        <select id="sellProduct">
+          <option value="milk">🥛 Maziwa — kwa lita</option>
+          <option value="eggs">🥚 Mayai — kwa tray</option>
+          <option value="kale">🥬 Sukuma wiki — kwa mfungo</option>
+          <option value="maize">🌽 Mahindi — kwa guni</option>
+          <option value="beans">🫘 Maharage — kwa guni</option>
+          <option value="goats">🐐 Mbuzi — kwa kichwa</option>
+          <option value="cattle">🐄 Ng'ombe — kwa kichwa</option>
+        </select>
+        <label for="sellPrice">Bei (KES)</label>
+        <input id="sellPrice" inputmode="decimal" placeholder="mfano 60">
+        <button class="btn" id="btnSell" style="margin-top:var(--s3)">Weka kwa mauzo</button>
+        <p class="tiny" id="sellOut" style="margin-top:var(--s2)"></p>
+      </div>
 
       <div id="ordersWrap" class="hide">
         <div class="hr"></div>
@@ -368,14 +394,25 @@ const $ = (s) => document.querySelector(s);
 const kes = (n) => 'KES ' + Number(n || 0).toLocaleString('en-KE');
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const S = { token: null, kind: null, farm: null, view: 'auth', lang: 'sw', cart: {}, how: 'pickup', order: null, shop: null, ladder: null };
+// `token` is the FARMER's; `customerToken` is the buyer's. Two principals, kept
+// apart on purpose — a farmer often opens their own shop link to check it, and
+// that must not sign them out of their farm.
+const S = {
+  token: null, kind: null, farm: null, view: 'auth', lang: 'sw',
+  cart: {}, how: 'pickup', order: null, shop: null, ladder: null,
+  sellables: [], customerToken: null,
+};
 
 // ── API ───────────────────────────────────────────────────────────────────────
-async function api(method, path, body) {
+async function api(method, path, body, asToken) {
+  // `asToken` lets the CUSTOMER face prove itself without disturbing a farmer's
+  // session: the two principals have separate tokens and must never overwrite
+  // each other (a farmer testing their own shop is the common case).
+  const bearer = asToken !== undefined ? asToken : S.token;
   try {
     const r = await fetch(API + path, {
       method,
-      headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}) },
+      headers: { 'Content-Type': 'application/json', ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
     const j = await r.json().catch(() => null);
@@ -385,6 +422,21 @@ async function api(method, path, body) {
     netDown();
     return { status: 0, body: null, error: e.message };
   }
+}
+
+/** Sign a customer in (phone-verified). Returns the token, or null. */
+async function customerSignIn() {
+  const phone = prompt(S.lang === 'sw'
+    ? 'Namba yako ya simu (kuthibitisha oda)'
+    : 'Your phone number (to confirm the order)');
+  if (!phone) return null;
+  const r = await api('POST', '/auth/customer', { phone, name: '', slug: S.shop?.farm?.slug }, null);
+  if (!r.body?.token) {
+    $('#coMode').textContent = '⚠ ' + (r.body?.error || (S.lang === 'sw' ? 'Imeshindwa kuthibitisha namba' : 'Could not verify the number'));
+    return null;
+  }
+  S.customerToken = r.body.token;
+  return S.customerToken;
 }
 function netDown() {
   const el = $('#net'); el.classList.remove('hide');
@@ -417,6 +469,7 @@ async function loadFarmer() {
 
   const t = await api('GET', '/farm/' + S.farm._id + '/today');
   if (t.body?.ok) renderToday(t.body);
+  await loadSellables();
   await loadOrders();
   await loadMoney();
   await loadLadder();
@@ -462,6 +515,75 @@ function renderHolds(holds) {
       <div class="bar"><i style="width:${pct}%"></i></div>
       <p class="tiny">${left} ${S.lang === 'sw' ? 'siku zilizobaki' : 'days left'}</p></div>`;
   }).join('');
+}
+
+// ── UZA — putting a product up for sale ───────────────────────────────────────
+// The farmer supplies a PRICE. Everything else — how much is on the shelf — is
+// derived server-side from the logs, crops and animals. That is the projection
+// rule (src/projection.js): the storefront is never authored, so the farmer never
+// keeps a second set of books.
+//
+// `source.kind` must be one of the three the projection understands:
+//   production     → summed from Logs (milk, eggs)
+//   harvest        → summed from harvested CropCycles (maize, beans, kale)
+//   animalForSale  → counted from Animals with status 'forSale'
+// `affects` is what a withdrawal hold suppresses — milk and meat, not eggs.
+const SELLABLE_CATALOG = {
+  milk:   { label: 'Fresh milk',  labelSw: 'Maziwa mapya', unit: 'litre', unitSw: 'lita',   icon: '🥛',
+            source: { kind: 'production', product: 'milk', windowDays: 1 }, affects: ['milk'] },
+  eggs:   { label: 'Eggs',        labelSw: 'Mayai',        unit: 'tray',  unitSw: 'tray',   icon: '🥚',
+            source: { kind: 'production', product: 'eggs', windowDays: 2 }, affects: [] },
+  kale:   { label: 'Kale',        labelSw: 'Sukuma wiki',  unit: 'bunch', unitSw: 'mfungo', icon: '🥬',
+            source: { kind: 'harvest', product: 'kale' }, affects: [] },
+  maize:  { label: 'Maize',       labelSw: 'Mahindi',      unit: 'bag',   unitSw: 'guni',   icon: '🌽',
+            source: { kind: 'harvest', product: 'maize' }, affects: [] },
+  beans:  { label: 'Beans',       labelSw: 'Maharage',     unit: 'bag',   unitSw: 'guni',   icon: '🫘',
+            source: { kind: 'harvest', product: 'beans' }, affects: [] },
+  goats:  { label: 'Goat',        labelSw: 'Mbuzi',        unit: 'head',  unitSw: 'kichwa', icon: '🐐',
+            source: { kind: 'animalForSale', product: 'goats' }, affects: ['meat'] },
+  cattle: { label: 'Cow',         labelSw: 'Ng\'ombe',     unit: 'head',  unitSw: 'kichwa', icon: '🐄',
+            source: { kind: 'animalForSale', product: 'cattle' }, affects: ['meat'] },
+};
+
+async function loadSellables() {
+  const r = await api('GET', '/farm/' + S.farm._id + '/sellables');
+  if (!r.body?.ok) return;
+  S.sellables = r.body.sellables || [];
+  renderSellables(r.body.availability || []);
+}
+
+function renderSellables(availability) {
+  const rows = S.sellables || [];
+  if (!rows.length) {
+    $('#sellList').innerHTML = '<p class="muted">Haujauza kitu bado. Weka bei ya kitu kimoja hapa chini — '
+      + 'duka lako linafunguka mara moja.</p>';
+    return;
+  }
+  $('#sellList').innerHTML = rows.map((s) => {
+    const av = availability.find((a) => a.product === s.product) || {};
+    const onShelf = av.suppressed
+      ? '<span style="color:var(--alert);font-weight:620">Imezuiwa — dawa</span>'
+      : av.qty > 0 ? `${av.qty} ${esc(av.unit || '')}` : '<span class="muted">hakuna stock bado</span>';
+    return `<div class="item">
+      <div class="thumb" aria-hidden="true">${esc(s.icon || '·')}</div>
+      <div style="flex:1;min-width:0">
+        <div class="nm">${esc(s.labelSw || s.label || s.product)}</div>
+        <div class="pr money">${kes(s.price)} <span class="muted">/ ${esc(s.unitSw || s.unit || '')}</span></div>
+        <div class="tiny">Sokoni: ${onShelf}</div>
+      </div>
+      <button class="btn ghost sm" data-reprice="${s.product}" data-current="${s.price}">Badilisha bei</button>
+    </div>`;
+  }).join('');
+}
+
+async function saveSellable(product, price) {
+  const c = SELLABLE_CATALOG[product];
+  if (!c) return false;
+  const r = await api('POST', '/farm/' + S.farm._id + '/sellables', {
+    product, label: c.label, labelSw: c.labelSw, unit: c.unit, unitSw: c.unitSw, icon: c.icon,
+    price: Number(price), minQty: 1, source: c.source, affects: c.affects,
+  });
+  return !!r.body?.ok;
 }
 
 async function loadOrders() {
@@ -700,6 +822,34 @@ document.addEventListener('click', async (e) => {
     catch { $('#logOut').textContent = url; }
     return;
   }
+  // ── UZA ──────────────────────────────────────────────────────────────────────
+  if (b.id === 'btnSell') {
+    const product = $('#sellProduct').value;
+    const price = Number($('#sellPrice').value);
+    if (!(price > 0)) { $('#sellOut').textContent = 'Weka bei kwanza.'; return; }
+    if (await saveSellable(product, price)) {
+      const c = SELLABLE_CATALOG[product];
+      $('#sellOut').textContent = `✓ ${c.labelSw} iko sokoni kwa ${kes(price)} / ${c.unitSw}.`;
+      $('#sellPrice').value = '';
+      await loadSellables();
+      // The shop face reads the same projection, so refresh it too.
+      if (S.shop) await loadShop(S.shop.farm?.slug);
+    } else {
+      $('#sellOut').textContent = 'Imeshindwa — jaribu tena.';
+    }
+    return;
+  }
+  if (d.reprice) {
+    const next = prompt('Bei mpya (KES)', d.current);
+    if (next === null) return;
+    const price = Number(next);
+    if (!(price > 0)) return;
+    if (await saveSellable(d.reprice, price)) {
+      $('#sellOut').textContent = `✓ Bei imebadilishwa: ${kes(price)}.`;
+      await loadSellables();
+    }
+    return;
+  }
   if (d.advance) { await api('POST', `/farm/${S.farm._id}/orders/${d.advance}/stage`, { stage: Number(d.stage) }); await loadFarmer(); return; }
   if (d.accept) { await api('POST', `/farm/${S.farm._id}/ladder/accept`, { rung: ladderId(Number(d.accept)) }); await loadFarmer(); await loadLadder(); return; }
 
@@ -709,18 +859,28 @@ document.addEventListener('click', async (e) => {
   if (b.id === 'btnCartGo') { renderCheckout(); return show('checkout'); }
   if (b.id === 'howPickup' || b.id === 'howDelivery') { S.how = b.id === 'howPickup' ? 'pickup' : 'delivery'; renderCheckout(); return; }
   if (b.id === 'btnCustomer') {
-    const phone = prompt('Namba ya simu'); if (!phone) return;
-    await api('POST', '/auth/customer', { phone, name: '', slug: S.shop?.farm?.slug });
-    S.token = null; S.kind = 'customer';  // shop is open; a token is only needed to order
-    $('#logOut').textContent = '✓ Umeingia kama mteja';
+    // Before: this discarded the token it had just been given, so an order could
+    // never succeed. The token IS the customer's identity — keep it.
+    const tok = await customerSignIn();
+    if (tok) $('#logOut').textContent = S.lang === 'sw' ? '✓ Umeingia kama mteja' : '✓ Signed in as a customer';
     return;
   }
   if (b.id === 'btnPay') {
+    // The shop is open to BROWSE, but an order needs a verified phone — that is the
+    // trust mechanism, not a paywall. Ask for it HERE rather than bouncing the
+    // customer out to a button they have not noticed.
+    let tok = S.customerToken;
+    if (!tok) tok = await customerSignIn();
+    if (!tok) return;
+
     const r = await api('POST', `/shop/${S.shop.farm.slug}/order`, {
       lines: cartLines().map((l) => ({ product: l.product, qty: l.qty })),
       how: S.how, slot: $('#coSlot').value, addr: $('#coAddr').value, note: $('#coNote').value, pay: true,
-    });
-    if (!r.body?.ok) { $('#coMode').textContent = '⚠ ' + (r.body?.error || 'Imeshindwa'); return; }
+    }, tok);
+    if (!r.body?.ok) {
+      $('#coMode').textContent = '⚠ ' + (r.body?.error || (S.lang === 'sw' ? 'Imeshindwa' : 'Failed'));
+      return;
+    }
     S.order = r.body.order; S.cart = {}; renderState(); return show('state');
   }
   if (b.id === 'btnTrack') { if (S.order) { renderState(); return show('state'); } return; }
