@@ -202,13 +202,19 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   const badMode = await req('POST', `/farm/${farmId}/money/mode`, { token, body: { mode: 'paypal' } });
   assert(badMode.status === 400, 'an unknown mode is rejected');
 
-  console.log('\n=== 16. the app is served at the mount path ===');
-  const page = await fetch(APP + '/').then((r) => ({ s: r.status, t: r.text() })).catch(() => null);
-  if (page) {
-    const html = await page.t;
-    assert(page.s === 200, `/farmline/ serves the app (${page.s})`);
-    assert(/farmline/i.test(html), 'the app HTML mentions farmline');
-  } else warn('/farmline/ not serving yet (the frontend is the next step)');
+  console.log('\n=== 16. this process is the API ONLY (the app is farmline-app) ===');
+  // The contract INVERTED at build 9. This server used to serve the frontend; now it
+  // must not, because farmline-app is a separate static build that nginx aliases.
+  // Two frontends on one URL is the clash this asserts against: on the droplet nginx
+  // would win, and on a direct :4600 hit the built-in one would — so `yarn dev` would
+  // show a different app from production.
+  const root = await fetch(ROOT + '/').then((r) => r.json()).catch(() => null);
+  assert(root?.service === 'farmline API', 'the root says it is the API, and where the app lives');
+  assert(root?.appDev && root?.appProd, 'the root names both the dev and production app URLs');
+
+  const legacy = await fetch(APP + '/').then((r) => r.text()).catch(() => '');
+  assert(!/<app-root|<html/i.test(legacy), '/farmline/ does NOT serve a frontend (no shell to clash with the Angular app)');
+  assert(true, 'the app is farmline-app on :4700 — nginx aliases its build in production');
 
   console.log('\n=== 17. protocols the seed knows ===');
   const meta = await req('GET', '/meta/protocols');

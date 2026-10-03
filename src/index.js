@@ -637,38 +637,32 @@ api.get('/meta/vocab', (_req, res) => ok(res, { terms: vocab.TERMS, banned: voca
 app.use(config.apiPrefix, api);
 
 // ══════════════════════════════════════════════════════════════════════════════
-// STATIC APP — served at BASE_PATH (zyppar.com/farmline/)
+// NO FRONTEND HERE. THIS PROCESS IS THE API ONLY.
 // ──────────────────────────────────────────────────────────────────────────────
-const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-
-// CACHE HEADERS BY ROLE — the app-side half of the LoopKeeper lesson.
+// Until build 8 this process also served the frontend: one hand-written HTML file
+// from public/. The Angular rewrite (farmline-app) moved the frontend to its own
+// repo and its own static build, which nginx serves from /var/www/farmline — the
+// LoopKeeper shape.
 //
-// The nginx insert pins /farmline/index.html to no-cache, and that is correct.
-// But an application that relies on a proxy to keep it honest breaks the moment
-// the proxy is missing or drifts — a staging box, a direct :4600 hit, a phone
-// wrapper, a future ingress. `maxAge: '1h'` on the HTML was a real defect: it
-// let a farmer hold an app shell for an hour that no longer matched the API.
+// So the static handler, the SPA deeplink routes and public/ are GONE. Keeping them
+// would have been worse than dead code: two frontends on one URL, and whichever one
+// won would depend on whether nginx was in front. On the droplet nginx would win; on
+// a direct :4600 hit THIS would win, and `yarn dev` would open a vanilla app that no
+// longer reflects the product. That is exactly the clash this removal prevents.
 //
-// So the app states the rule itself: the SHELL is never cached; the version
-// stamp is never cached; everything else (there is almost nothing else) may be.
-app.use(config.basePath, express.static(PUBLIC_DIR, {
-  extensions: ['html'],
-  etag: true,
-  lastModified: true,
-  setHeaders(res, filePath) {
-    if (/index\.html$/.test(filePath)) {
-      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    } else if (/build\.json$/.test(filePath)) {
-      res.setHeader('Cache-Control', 'no-cache');
-    } else {
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-    }
-  },
+// The app lives at http://localhost:4700 in dev (see farmline-app), and at
+// https://zyppar.com/farmline/ behind nginx.
+//
+// A root hit here is a human looking for the app, so say where it is rather than
+// returning a bare 404.
+app.get('/', (_req, res) => res.json({
+  ok: true,
+  service: 'farmline API',
+  api: config.apiPrefix,
+  appDev: 'http://localhost:4700/',
+  appProd: `${config.publicUrl}${config.basePath}/`,
+  note: 'This process serves the API only. The app is a separate static build (farmline-app).',
 }));
-// A shop deeplink is the farm's own URL: /farmline/s/<slug>
-app.get(config.basePath + '/s/:slug', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
-app.get(config.basePath, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
-app.get('/', (_req, res) => res.redirect(config.basePath + '/'));
 
 app.use((req, res) => res.status(404).json({ ok: false, error: 'no such route', path: req.originalUrl }));
 

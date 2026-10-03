@@ -49,25 +49,33 @@ for (const dep of Object.keys(pkg.dependencies || {})) {
   catch { bad(`dependency ${dep} is not installed — run: yarn install`); }
 }
 const depCount = Object.keys(pkg.dependencies || {}).length;
-depCount <= 2 ? pass(`dependency count is ${depCount} (AGENTS.md caps it at two)`)
-              : soft(`${depCount} dependencies — AGENTS.md says two without explicit approval`);
+depCount <= 3 ? pass(`dependency count is ${depCount} (express, mongoose, socket.io — AGENTS.md caps it at three)`)
+              : soft(`${depCount} dependencies — AGENTS.md says three without explicit approval`);
 
-// ── 2. the app shell ──────────────────────────────────────────────────────────
-console.log('\napp');
-const shell = path.join(ROOT, 'public', 'index.html');
-if (fs.existsSync(shell)) {
-  const html = fs.readFileSync(shell, 'utf8');
-  const kb = Buffer.byteLength(html) / 1024;
-  pass(`public/index.html present (${kb.toFixed(1)} KB)`);
-  kb > 120 ? soft(`${kb.toFixed(1)} KB is heavy for a rural 2G target`) : null;
-  /https?:\/\/(fonts|cdn)\./i.test(html)
-    ? bad('the shell references an external font/CDN — AGENTS.md forbids it')
-    : pass('shell is self-contained (no external fonts or CDNs)');
-  const stamped = html.match(/<meta\s+name="farmline-build"\s+content="(\d+)"/);
-  stamped ? pass(`shell stamped with build ${stamped[1]}`)
-          : soft('shell is NOT stamped — run `yarn build` so the app can self-heal a stale cache');
+// ── 2. THIS PROCESS SERVES THE API ONLY ───────────────────────────────────────
+// Until build 8 this repo also served the frontend from public/. It does not any
+// more (farmline-app is a separate Angular build), and the check that matters now
+// is the OPPOSITE of the old one: the frontend must NOT be here, or two apps would
+// answer the same URL depending on whether nginx was in front.
+console.log('\napi');
+const staleFrontend = path.join(ROOT, 'public', 'index.html');
+if (fs.existsSync(staleFrontend)) {
+  bad('public/index.html is still present — the vanilla frontend was superseded by farmline-app. '
+    + 'Two frontends on one URL: nginx would serve the Angular build in production and THIS one on a '
+    + 'direct :4600 hit, which is the clash the removal was meant to prevent.');
 } else {
-  bad('public/index.html is missing — the app has nothing to serve');
+  pass('no frontend in this repo (API only) — the app is farmline-app');
+}
+
+// Is the app reachable where a developer would look for it? Not fatal: the API can
+// run alone. But saying so saves the "why is the page blank" minute. Probed in the
+// async chain at the bottom of this file — the top level of a CommonJS module
+// cannot await.
+const APP_PORT = Number(process.env.APP_PORT || 4700);
+function probeApp() {
+  return fetch(`http://localhost:${APP_PORT}/`, { signal: AbortSignal.timeout(1200) })
+    .then((r) => { r.ok ? pass(`the app is answering on :${APP_PORT}`) : soft(`something is on :${APP_PORT} but did not answer 200`); })
+    .catch(() => { soft(`the app is not running on :${APP_PORT} — start it with: cd ../farmline-app && yarn start`); });
 }
 
 // ── 3. .env ───────────────────────────────────────────────────────────────────
@@ -165,7 +173,7 @@ function probePort() {
   });
 }
 
-probeMongo().then(probePort).then(finish);
+probeMongo().then(probePort).then(probeApp).then(finish);
 
 function finish() {
   console.log(`\n${fatal ? `PREFLIGHT FAILED — ${fatal} fatal, ${warn} warning(s). Do not start.` : `PREFLIGHT OK${warn ? ` — ${warn} warning(s)` : ''}.`}\n`);

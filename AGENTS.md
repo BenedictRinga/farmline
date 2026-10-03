@@ -2,34 +2,34 @@
 
 Mirrors the LoopKeeper (`rolodex-server`) conventions deliberately. Read this before changing anything.
 
-## THE STACK — read this first, it is not what LoopKeeper is
+## THE STACK — this repo is the API. The app is a separate repo.
 
-**farmline is NOT Angular.** There is no frontend framework, no bundler, no compile step, and no
-`node_modules` on the frontend side at all.
+**This process serves the API only.** It has no frontend, no static handler and no
+`public/` directory. Until build 8 it also served one hand-written HTML file; the Angular
+rewrite moved the frontend to **`farmline-app`** and removed it from here.
 
 | | LoopKeeper | farmline |
 |---|---|---|
-| Frontend | **Angular** (`rolodex-app`, `ng serve` :4400, `ng build` → bundle) | **one hand-written HTML file**, vanilla JS — `public/index.html` (~43 KB) |
-| Frontend dependencies | Angular, Ionic, Capacitor, thousands of packages | **zero** |
-| Build step | yes — `ng build`, post-build `scripts/*.cjs` fixers | **none** — the file is served as written |
-| Backend | Node/Express/Mongoose (`rolodex-server` :4411) | Node/Express/Mongoose (`:4600`) — same pattern |
-| Backend dependencies | express, mongoose, socket.io, stripe | **express + mongoose only** |
+| Frontend repo | `rolodex-app` (Angular, ionic, capacitor) | **`farmline-app`** — same Angular 18.1.0 / Ionic 8 / Capacitor 6 pins |
+| Frontend build | `ng build` → hashed bundle | `yarn build:prod` → `www/`, aliased by nginx from `/var/www/farmline` |
+| This repo | `rolodex-server` — API on :4411 | **API only** on :4600 |
+| Backend deps | express, mongoose, socket.io, stripe | **express, mongoose, socket.io** (three, approved 2026-10-03 for chat) |
 
-The frontend is served **by the backend process itself** (`express.static` at `BASE_PATH`). That is
-why there is one dev server and not two.
+**Why the frontend is NOT in this repo, and must not come back.** Two frontends on one URL is
+the failure mode: nginx would serve the Angular build at `/farmline/` in production, and a
+direct `:4600` hit would serve whatever this process had — so `yarn dev` would show a different
+app from production, and every bug report would depend on which one the reporter hit. `yarn
+preflight` FAILS if `public/index.html` reappears here.
 
-**Why vanilla, and what it costs.** The target is a farmer on a cheap Android phone on rural 2G:
-a 43 KB file that renders in under a second beats a framework bundle by an order of magnitude, and
-a build step is one more thing that can go stale between what you edited and what runs. The cost is
-real and should be stated: no components, no typed templates, no framework tooling. If farmline
-ever grows a team or the UI triples in size, that trade should be re-examined deliberately — not
-drifted into. Do not add a framework to `public/index.html` without the founder's explicit decision.
+Consequence: `scheduled`, `projection`, `protocols`, `ladder`, `money`, `vocab` and `models`
+are pure domain logic with no HTTP-framework coupling. Do not introduce frontend concerns
+(templating, bundling, view shaping beyond `projection.js`) into this repo.
 
 ## Repo rules
 - **YARN ONLY.** Never use npm here.
-- The full gate before committing: `yarn release` (= `check` → `build` → `smoke`).
-- Bump `package.json` `build` counter with every user-visible backend change. `yarn build`
-  stamps the new number into `public/index.html` — the app self-heals a stale cache from it.
+- The full gate before committing: `yarn release` (= `check` → `smoke`).
+- Bump `package.json` `build` counter with every user-visible backend change. `/api/farmline/version`
+  reports it, and the app compares it to its own build to detect a stale bundle.
 - The server talks to its **own `farmline` Mongo database**. **Never touch the `zyppar` or `rolodex` databases.**
   `yarn preflight` fails the run if the URI points anywhere else.
 - Plain CommonJS. No TypeScript, no build step, no bundler.
@@ -69,18 +69,24 @@ Only the Daraja **callback** settles a payment (`settleByCheckout`, matched on `
 `FARMLINE_PUBLIC_URL` must be the real public host: Daraja POSTs the result there, and a callback
 pointed at localhost silently never arrives while the buyer's money is already gone.
 
-## DEV — how the two faces are run locally
+## DEV — running the two halves locally
 
-**farmline is ONE process, not two.** LoopKeeper splits the app (`rolodex-app`, `ng serve` on
-:4400) from the server (`rolodex-server`, :4411), because it is an Angular build with a compile
-step. farmline has no build step: the Node process serves `public/index.html` itself, so the app
-and the API are the **same origin on the same port**. There is no second dev server to start and
-no CORS to configure.
+**Two processes now**, like LoopKeeper: the API here on **:4600**, and the Angular app in
+`farmline-app` on **:4700**. The app proxies `/api` and `/socket-farmline` to :4600, so in a
+browser everything is same-origin and there is no CORS to configure.
 
 ```bash
-yarn dev          # starts :4600 AND OPENS THE BROWSER at the app
-yarn seed         # (second terminal) fills a farm so you are not debugging an empty one
+# terminal 1 — the API
+yarn dev          # :4600, watches src/, prints where the app should be
+yarn seed         # fills a farm so you are not debugging an empty one
+
+# terminal 2 — the app
+cd ../farmline-app && yarn start    # :4700, proxies to :4600, opens the browser
 ```
+
+`yarn dev` will **not** open a browser at the API — there is no app here to open. If the app is
+running it opens :4700; if it is not, it says so rather than opening a dead tab.
+
 
 `yarn dev` runs `scripts/dev.cjs` — farmline's equivalent of `ng serve --open`. LoopKeeper got that
 flag for free; here it had to be written. It starts the watcher, waits for `/health`, prints the
@@ -143,10 +149,9 @@ produces a **stamp** rather than compiled output — that is the whole differenc
 | Script | Does | Run when |
 |---|---|---|
 | `yarn preflight` | Is this machine able to run farmline? Fails loudly on an unset `AUTH_SECRET` on a prod host, a local-mongo URI on a droplet, a Mongo db name that is not `farmline`, a taken port, an external CDN in the shell. | Before starting, and on the droplet before deploying |
-| `yarn check` | `node --check` over every source and script file | Every commit |
-| `yarn build` | Writes `public/build.json` + stamps `farmline-build`/`-version`/`-commit` meta into `public/index.html`. Idempotent. | Every commit that changes the shell |
-| `yarn smoke` | Boots a throwaway server on port **4699**, runs the 67-check suite against it, shuts it down. Refuses to run if 4699 is busy. | Every commit |
-| `yarn test` | The suite alone, against `FARMLINE_TEST_BASE` (default `:4600`) | Debugging |
+| `yarn check` | `node --check` over every source, script and test file | Every commit |
+| `yarn smoke` | Boots a throwaway server on port **4699**, runs all three suites (integration, UI contract, chat+money), shuts it down. Refuses to run if 4699 is busy. | Every commit |
+| `yarn test` | The integration suite alone, against `FARMLINE_TEST_BASE` (default `:4600`) | Debugging |
 | `yarn verify [url]` | Verifies a **deployed** farmline over HTTPS: `/api/farmline/version` returns JSON (not the shell), deploy-drift, real-404 on a missing API path, shell not cached, the share deeplink, and that LoopKeeper is untouched. | After every deploy |
 | `yarn release` | `check` → `build` → `smoke` | The gate |
 | `./deploy.sh` | The droplet deploy | On the droplet |

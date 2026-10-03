@@ -25,8 +25,12 @@ function envFromFile(name) {
 }
 
 const PORT = Number(process.env.PORT || envFromFile('PORT') || 4600);
-const BASE_PATH = process.env.BASE_PATH || envFromFile('BASE_PATH') || '/farmline';
-const APP_URL = `http://localhost:${PORT}${BASE_PATH}/`;
+// THIS PROCESS IS THE API ONLY (build 9). The frontend is farmline-app, a separate
+// Angular build on its own port. `yarn dev` used to open :4600/farmline/ — which no
+// longer serves anything — so it now opens the APP and says where the API is.
+const APP_PORT = Number(process.env.APP_PORT || 4700);
+const APP_URL = `http://localhost:${APP_PORT}/`;
+const API_URL = `http://localhost:${PORT}/api/farmline`;
 // The API lives at its OWN prefix (nginx-proxied in production), never under
 // BASE_PATH — so this is hardcoded to the API prefix rather than derived.
 const VERSION_URL = `http://127.0.0.1:${PORT}/api/farmline/version`;
@@ -57,11 +61,13 @@ async function farmlineOn() {
   // ── already running? ───────────────────────────────────────────────────────
   const existing = await farmlineOn();
   if (existing) {
-    console.log(`  a farmline server is ALREADY on :${PORT} — build ${existing.build} · env=${existing.env} · db=${existing.dbName}`);
+    console.log(`  the API is ALREADY on :${PORT} — build ${existing.build} · env=${existing.env} · db=${existing.dbName}`);
     console.log('  Not starting a second one (a stale process silently answering with old code is');
     console.log('  the worst dev failure there is). Restart it yourself if you changed src/.');
-    console.log(`\n  ${APP_URL}\n`);
-    openBrowser(APP_URL);
+    console.log(`\n  api  ${API_URL}`);
+    console.log(`  app  ${APP_URL}`);
+    if (await appRunning()) openBrowser(APP_URL);
+    else console.log(`\n  the app is not running on :${APP_PORT} — cd ../farmline-app && yarn start\n`);
     return;
   }
 
@@ -91,10 +97,28 @@ async function farmlineOn() {
   }
 
   console.log(`\n  ${up.isProduction === true ? 'PRODUCTION' : (up.env || 'dev').toUpperCase()} · db=${up.dbName} · build ${up.build}`);
-  console.log(`  app   ${APP_URL}`);
-  console.log(`  edit  public/index.html and reload — no rebuild, no restart`);
-  console.log(`  seed  yarn seed   (in another terminal, for a populated farm)\n`);
-  openBrowser(APP_URL);
+  console.log(`  api    ${API_URL}      <- THIS process (no frontend here)`);
+  console.log(`  app    ${APP_URL}                     <- farmline-app (start it: cd ../farmline-app && yarn start)`);
+  console.log(`  seed   yarn seed                      (in another terminal, for a populated farm)\n`);
+
+  // Do not open a browser at a URL this process does not serve. Check the app first
+  // and say plainly what is missing — opening a dead tab teaches the wrong thing.
+  const appUp = await appRunning();
+  if (appUp) {
+    openBrowser(APP_URL);
+  } else {
+    console.log(`  the app is NOT running on :${APP_PORT} — start it in another terminal:`);
+    console.log(`      cd ../farmline-app && yarn start\n`);
+    if (OPEN) console.log(`  (not opening a browser at ${APP_URL}, because nothing is there yet)`);
+  }
 
   child.on('exit', (code) => process.exit(code ?? 0));
 })();
+
+/** Is the Angular app answering on its port? */
+async function appRunning() {
+  try {
+    const r = await fetch(APP_URL, { signal: AbortSignal.timeout(1500) });
+    return r.ok;
+  } catch { return false; }
+}

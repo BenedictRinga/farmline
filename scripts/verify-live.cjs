@@ -81,20 +81,22 @@ async function get(url, opts = {}) {
     info(`a missing API path → ${missing.status}`);
   }
 
-  // ── 3. the app shell ──────────────────────────────────────────────────────
-  console.log('\napp');
+  // ── 3. the app, which nginx serves as a STATIC build ──────────────────────
+  // This section changed at build 9. Until then Node served the shell and this
+  // checked a `<meta name="farmline-build">` stamp. Now the app is farmline-app's
+  // Angular bundle, aliased from /var/www/farmline, so the checks are: the bundle
+  // is there, it is an Angular app, and — the one that matters — the API is NOT
+  // also serving a shell (two frontends on one URL).
+  console.log('\napp (static build via nginx)');
   const shell = await get(`${BASE}/farmline/`);
   shell.status === 200 ? ok('/farmline/ → 200') : bad(`/farmline/ → ${shell.status}`);
   if (shell.status === 200) {
-    /farmline/i.test(shell.body) ? ok('the shell mentions farmline') : bad('the shell does not look like farmline');
-    const m = shell.body.match(/<meta\s+name="farmline-build"\s+content="(\d+)"/);
-    if (m) {
-      Number(m[1]) === LOCAL_BUILD
-        ? ok(`the served shell is stamped build ${m[1]}`)
-        : bad(`the served shell is stamped build ${m[1]}, local is ${LOCAL_BUILD} — a stale shell is being served`);
-    } else {
-      info('the served shell carries no build stamp (run `yarn build` and redeploy)');
-    }
+    /<app-root/i.test(shell.body)
+      ? ok('the served shell is the Angular app (<app-root>)')
+      : (/<html/i.test(shell.body)
+        ? bad('the served shell is NOT the Angular build — is this still the old vanilla index.html?')
+        : bad('the shell does not look like an app at all'));
+    /farmline/i.test(shell.body) ? ok('the shell mentions farmline') : info('the shell does not mention farmline');
   }
 
   const idx = await get(`${BASE}/farmline/index.html`);
@@ -102,6 +104,17 @@ async function get(url, opts = {}) {
   /no-cache|no-store|must-revalidate/.test(cc)
     ? ok(`/farmline/index.html is not cached (cache-control: ${cc})`)
     : bad(`/farmline/index.html cache-control is "${cc || '(none)'}" — a returning farmer can get a stale shell`);
+
+  // A missing ASSET must be a real 404, never the shell at HTTP 200. This is the
+  // ChunkLoadError storm: a deleted chunk answered with HTML passes no MIME check.
+  const missingAsset = await get(`${BASE}/farmline/this-chunk-does-not-exist.abc123.js`);
+  if (missingAsset.status === 200 && /<html/i.test(missingAsset.body)) {
+    bad('a missing asset → HTTP 200 with the shell. That is the ChunkLoadError storm.');
+  } else if (missingAsset.status === 404) {
+    ok('a missing asset → a real 404 (no shell masquerading as a chunk)');
+  } else {
+    info(`a missing asset → ${missingAsset.status}`);
+  }
 
   // ── 4. the distribution link ──────────────────────────────────────────────
   console.log('\ndistribution');
