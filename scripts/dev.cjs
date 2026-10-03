@@ -55,6 +55,26 @@ async function farmlineOn() {
   } catch { return false; }
 }
 
+/**
+ * Is SOMETHING listening on the port that is not farmline?
+ *
+ * This is the failure that cost real time: a plain `node src/index.js` left running by
+ * an earlier session holds :4600, answers nothing useful, and the next `yarn dev` dies
+ * with a bare EADDRINUSE that names no culprit. A TCP connect tells us the port is
+ * busy; the absence of a farmline version answer tells us it is not ours to reuse.
+ */
+function portInUse() {
+  const net = require('net');
+  return new Promise((resolve) => {
+    const s = net.createConnection({ host: '127.0.0.1', port: PORT });
+    const done = (v) => { s.destroy(); resolve(v); };
+    s.setTimeout(1200);
+    s.once('connect', () => done(true));
+    s.once('timeout', () => done(false));
+    s.once('error', () => done(false));
+  });
+}
+
 (async () => {
   console.log('\nfarmline dev\n');
 
@@ -63,12 +83,42 @@ async function farmlineOn() {
   if (existing) {
     console.log(`  the API is ALREADY on :${PORT} — build ${existing.build} · env=${existing.env} · db=${existing.dbName}`);
     console.log('  Not starting a second one (a stale process silently answering with old code is');
-    console.log('  the worst dev failure there is). Restart it yourself if you changed src/.');
+    console.log('  the worst dev failure there is).');
+    // If what is running is OLDER than what is on disk, say so plainly — otherwise you
+    // debug code that is not the code running.
+    const onDisk = Number(require(path.join(ROOT, 'package.json')).build) || 0;
+    if (existing.build < onDisk) {
+      console.log(`\n  ⚠ that is build ${existing.build}; the code on disk is build ${onDisk}.`);
+      console.log('    It is stale. Restart it:   yarn dev:restart');
+    } else {
+      console.log('    Restart it yourself if you changed src/:   yarn dev:restart');
+    }
     console.log(`\n  api  ${API_URL}`);
     console.log(`  app  ${APP_URL}`);
     if (await appRunning()) openBrowser(APP_URL);
     else console.log(`\n  the app is not running on :${APP_PORT} — cd ../farmline-app && yarn start\n`);
     return;
+  }
+
+  // ── the port is busy with something that is NOT farmline ───────────────────
+  // Name the culprit instead of dying with EADDRINUSE. A leftover process from an
+  // earlier session is the usual cause and the fix is usually `yarn dev:restart`.
+  if (await portInUse()) {
+    console.log(`  ✗ :${PORT} is in use, but it is NOT answering as a farmline API.`);
+    console.log('    Something else is holding the port — most often a leftover node process from');
+    console.log('    an earlier session. Find it and clear it:');
+    console.log('');
+    console.log(`        netstat -ano | findstr :${PORT}        # note the PID`);
+    console.log('        taskkill /PID <pid> /T /F              # stop it (Windows)');
+    console.log('');
+    console.log('    or start the API on a different port:');
+    console.log('');
+    console.log(`        PORT=4601 yarn dev     (then point farmline-app/proxy.conf.json at it)`);
+    console.log('');
+    console.log('    If the API is already correct and you just want the app, skip this entirely:');
+    console.log('        cd ../farmline-app && yarn start');
+    console.log('');
+    process.exit(1);
   }
 
   // ── start the watcher ──────────────────────────────────────────────────────

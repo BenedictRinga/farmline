@@ -160,8 +160,12 @@ async function call(method, path, body, token) {
   // ── report ─────────────────────────────────────────────────────────────────
   const finalShop = await call('GET', `/shop/${slug}`);
   step('what you can now look at');
-  console.log(`  app      ${ROOT_URL}/farmline/`);
-  console.log(`  shop     ${ROOT_URL}/farmline/s/${slug}     <- the customer face`);
+  // THE APP IS NOT HERE (build 9+). This process serves the API only; the frontend is
+  // farmline-app on its own port, so printing `${ROOT_URL}/farmline/` would send you to
+  // an API 404 and look like the seed failed.
+  const APP_ORIGIN = process.env.APP_ORIGIN || 'http://localhost:4700';
+  console.log(`  app      ${APP_ORIGIN}/                  <- farmline-app (cd ../farmline-app && yarn start)`);
+  console.log(`  shop     ${APP_ORIGIN}/s/${slug}     <- the customer face`);
   console.log(`  sign in  ${PHONE} / ${PIN}`);
   console.log(`  api      ${ROOT_URL}/api/farmline/version`);
   console.log('\n  shop now shows:');
