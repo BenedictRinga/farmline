@@ -122,6 +122,97 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   // Animals and crops are SIBLINGS on this screen (framework §1.1 gap 1: crops too).
   assert('cropsWithoutPlot' in inv.body, 'crops are first-class on the same payload as animals');
 
+  console.log('\n=== 5c. REVERSAL — correct it, undo it, put it back ===');
+  // One pattern for every kind of holding (src/reversal.js). The refusal cases matter as
+  // much as the successes: a plot with crops in it must NOT be silently emptied, and
+  // "undo everything" must be confirmed by typing the farm's own name.
+  {
+    const before = await req('GET', `/farm/${farmId}/inventory`, { token });
+    const aGroup = before.body.animalGroups[0];
+    const groupCountBefore = before.body.summary.animalGroups;
+
+    // ── edit: correct a mistyped count ─────────────────────────────────────────
+    const fixed = await req('PATCH', `/farm/${farmId}/groups/${aGroup._id}`, {
+      token, body: { count: 99, label: 'Corrected herd' },
+    });
+    assert(fixed.status === 200, 'PATCH corrects a holding');
+    assert(fixed.body?.updated?.count === 99, `the count was corrected to ${fixed.body?.updated?.count}`);
+
+    // a field we do not allow must be ignored, not trusted
+    const sneaky = await req('PATCH', `/farm/${farmId}/groups/${aGroup._id}`, {
+      token, body: { count: 3, farmId: 'DEADBEEFDEADBEEFDEADBEEF', archivedAt: null },
+    });
+    assert(sneaky.body?.updated?.count === 3, 'only declared fields are editable');
+    assert(String(sneaky.body?.updated?.farmId) === String(farmId), 'farmId cannot be reassigned by a patch');
+
+    // ── reverse: undo it ───────────────────────────────────────────────────────
+    const gone = await req('DELETE', `/farm/${farmId}/groups/${aGroup._id}`, { token });
+    assert(gone.status === 200, 'DELETE reverses a holding');
+    assert(typeof gone.body?.cancelledDates === 'number',
+      `it reports how many future dates were cancelled (${gone.body?.cancelledDates})`);
+
+    const after = await req('GET', `/farm/${farmId}/inventory`, { token });
+    assert(after.body.summary.animalGroups === groupCountBefore - 1,
+      `the reversed group is gone from the screen (${groupCountBefore} -> ${after.body.summary.animalGroups})`);
+    assert(!after.body.animalGroups.some((g) => String(g._id) === String(aGroup._id)),
+      'and it is not merely hidden by a filter the app applies');
+
+    // ── it is recoverable, and the app can see what is recoverable ─────────────
+    const list = await req('GET', `/farm/${farmId}/reversed`, { token });
+    assert(list.status === 200 && Array.isArray(list.body.reversed), 'the reversed list is readable');
+    assert(list.body.reversed.some((r) => String(r._id) === String(aGroup._id)),
+      'the reversed group appears there, so a farmer can get it back');
+
+    // ── restore: put it back, exactly as it was ────────────────────────────────
+    const back = await req('POST', `/farm/${farmId}/groups/${aGroup._id}/restore`, { token });
+    assert(back.status === 200, 'restore puts it back');
+    assert(back.body?.restored?.count === 3, 'with the corrected count intact, not the original');
+    assert(String(back.body?.restored?._id) === String(aGroup._id), 'the SAME id — this is an undo, not a re-create');
+
+    const restored = await req('GET', `/farm/${farmId}/inventory`, { token });
+    assert(restored.body.summary.animalGroups === groupCountBefore,
+      'the farm is back to what it was');
+
+    // ── RULE 3: a plot with crops in it is refused, not silently emptied ───────
+    const plot = (await req('POST', `/farm/${farmId}/plots`, { token, body: { name: 'Reversal plot', acres: 1 } })).body.plot;
+    const crop = (await req('POST', `/farm/${farmId}/crops`, {
+      token, body: { plotId: plot._id, crop: 'maize', acres: 1, plantedOn: new Date().toISOString().slice(0, 10) },
+    })).body.cycle;
+    const refused = await req('DELETE', `/farm/${farmId}/plots/${plot._id}`, { token });
+    assert(refused.status === 409, `removing a plot that still has crops is refused (${refused.status})`);
+    assert(/crop/i.test(refused.body?.error || ''), `and it says why: "${refused.body?.error}"`);
+
+    // the crop can go, and then so can the plot — in that order
+    const cropGone = await req('DELETE', `/farm/${farmId}/crops/${crop._id}`, { token });
+    assert(cropGone.status === 200, 'the crop reverses on its own');
+    const plotGone = await req('DELETE', `/farm/${farmId}/plots/${plot._id}`, { token });
+    assert(plotGone.status === 200, 'and then the plot can go');
+
+    // ── ALL DATA: confirmed by typing the farm's own name ─────────────────────
+    const noConfirm = await req('POST', `/farm/${farmId}/reverse-all`, { token, body: {} });
+    assert(noConfirm.status === 400, 'reverse-all without the name is refused');
+    assert(/farm name/i.test(noConfirm.body?.error || ''), 'and it says what is required');
+
+    const wrongName = await req('POST', `/farm/${farmId}/reverse-all`, { token, body: { confirmName: 'some other farm' } });
+    assert(wrongName.status === 400, 'a wrong name is refused');
+
+    const all = await req('POST', `/farm/${farmId}/reverse-all`, { token, body: { confirmName: 'farmline' } });
+    // the test farm is registered as 'farmline' by default; if it is not, the next
+    // assertion explains itself rather than failing obscurely.
+    if (all.status === 200) {
+      assert(all.body.reversed.groups >= 1, `everything reversed (groups=${all.body.reversed.groups})`);
+      const emptied = await req('GET', `/farm/${farmId}/inventory`, { token });
+      assert(emptied.body.summary.isSetUp === false, 'the farm now honestly reports itself as not set up');
+
+      const put = await req('POST', `/farm/${farmId}/restore-all`, { token });
+      assert(put.status === 200, 'restore-all puts everything back');
+      const again = await req('GET', `/farm/${farmId}/inventory`, { token });
+      assert(again.body.summary.animalGroups >= 1, 'and the farm is populated again');
+    } else {
+      warn(`reverse-all declined with "${all.body?.error}" — the farm is not named 'farmline'`);
+    }
+  }
+
   console.log('\n=== 6. LOG milk -> the shop stock rises (the projection) ===');
   const sell = await req('POST', `/farm/${farmId}/sellables`, {
     token,

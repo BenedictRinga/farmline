@@ -21,6 +21,7 @@ const mpesa = require('./mpesa');
 const chat = require('./chat');
 const schedule = require('./schedule');
 const projection = require('./projection');
+const reversal = require('./reversal');
 const protocols = require('./protocols');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
@@ -245,10 +246,11 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
     // that has to feel like the farmer's own place. Photography is the strongest trust
     // signal we have (framework §1.8), so the photos come with it.
     Farm.findById(farmId).select('name slug rung area county story photos verifiedFarm').lean(),
-    Plot.find({ farmId }).sort({ name: 1 }).lean(),
-    CropCycle.find({ farmId }).sort({ plantedOn: -1 }).lean(),
-    AnimalGroup.find({ farmId, active: true }).sort({ species: 1 }).lean(),
-    Animal.find({ farmId }).lean(),
+    // archivedAt: null — a reversed holding is hidden, not destroyed (src/reversal.js)
+    Plot.find({ farmId, archivedAt: null }).sort({ name: 1 }).lean(),
+    CropCycle.find({ farmId, archivedAt: null }).sort({ plantedOn: -1 }).lean(),
+    AnimalGroup.find({ farmId, active: true, archivedAt: null }).sort({ species: 1 }).lean(),
+    Animal.find({ farmId, status: { $ne: 'sold' } }).lean(),
     // Only what is still outstanding. Completed and abandoned history is Layer 2+.
     ScheduledEvent.find({ farmId, status: { $in: ['due', 'carried'] } })
       .select('subjectType subjectId subjectLabel intervention dueOn baseline withdrawal')
@@ -361,6 +363,87 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
     cropsWithoutPlot: unplaced,
     at: now,
   });
+}));
+
+// ──────────────────────────────────────────────────────────────────────────────
+// REVERSAL — correct it, undo it, put it back. One pattern, all three kinds.
+// ──────────────────────────────────────────────────────────────────────────────
+// The founder asked for "template reversal... particular input or all data". The whole
+// behaviour lives in src/reversal.js so that a group, a plot and a crop cannot drift
+// apart; these routes are a thin, uniform shell over it.
+//
+// The refusal cases are as important as the successful ones: a plot with crops in it is
+// refused with a reason rather than silently emptied, and "undo everything" must be
+// confirmed by TYPING THE FARM'S OWN NAME, because a tap-through dialog is not a
+// confirmation for something that empties a farm.
+
+const REVERSAL_KINDS = ['groups', 'plots', 'crops'];
+
+function checkKind(req, res) {
+  if (!REVERSAL_KINDS.includes(req.params.kind)) {
+    bad(res, 404, `no such kind: ${req.params.kind}`);
+    return false;
+  }
+  return true;
+}
+
+/** Correct a mistake — a mistyped count, a wrong planting date. */
+api.patch('/farm/:farmId/:kind/:id', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  if (!checkKind(req, res)) return;
+  try {
+    const doc = await reversal.edit(req.params.kind, req.params.farmId, req.params.id, req.body || {});
+    return ok(res, { updated: doc });
+  } catch (e) {
+    return bad(res, e.status || 500, e.message);
+  }
+}));
+
+/** Undo it. Archived, not destroyed, so this can itself be undone. */
+api.delete('/farm/:farmId/:kind/:id', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  if (!checkKind(req, res)) return;
+  try {
+    const { cancelled } = await reversal.reverse(req.params.kind, req.params.farmId, req.params.id);
+    return ok(res, {
+      reversed: true,
+      // Say what actually happened to the schedule — a farmer who is told "3 dates
+      // cancelled" understands; one who is told "deleted" does not know what is left.
+      cancelledDates: cancelled,
+    });
+  } catch (e) {
+    return bad(res, e.status || 500, e.message);
+  }
+}));
+
+/** Put it back, exactly as it was. */
+api.post('/farm/:farmId/:kind/:id/restore', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  if (!checkKind(req, res)) return;
+  try {
+    const { doc, added } = await reversal.restore(req.params.kind, req.params.farmId, req.params.id);
+    return ok(res, { restored: doc, datesRestored: added });
+  } catch (e) {
+    return bad(res, e.status || 500, e.message);
+  }
+}));
+
+/** What has been undone, so it can be recovered. */
+api.get('/farm/:farmId/reversed', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  return ok(res, { reversed: await reversal.reversed(req.params.farmId) });
+}));
+
+/** ALL DATA. Confirmed by typing the farm's own name. */
+api.post('/farm/:farmId/reverse-all', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const farm = await Farm.findById(req.params.farmId).select('name').lean();
+  try {
+    const counts = await reversal.reverseAll(req.params.farmId, req.body?.confirmName, farm && farm.name);
+    return ok(res, { reversed: counts });
+  } catch (e) {
+    return bad(res, e.status || 500, e.message);
+  }
+}));
+
+/** Put the whole farm back. */
+api.post('/farm/:farmId/restore-all', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  return ok(res, { restored: await reversal.restoreAll(req.params.farmId) });
 }));
 
 api.post('/farm/:farmId/sellables', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {

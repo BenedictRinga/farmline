@@ -103,6 +103,13 @@ const customerSchema = new Schema({
 
 // ── LAND & CROPS (first-class, not a plugin) ──────────────────────────────────
 const plotSchema = new Schema({
+  // REVERSAL. Archiving hides a holding without destroying it, so "undo" is a real
+  // undo: the id, the planting date and the links to its own logs all survive. A
+  // destroy-and-recreate undo would lose all three, and would leave the farmer's
+  // history pointing at a row that no longer exists.
+  //
+  // Nothing is ever hard-deleted by the app. Reversal is reversible.
+  archivedAt: { type: Date, default: null },
   farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
   name: { type: String, required: true },       // 'Plot B'
   acres: { type: Number, default: 0 },
@@ -112,6 +119,13 @@ const plotSchema = new Schema({
 }, { timestamps: true });
 
 const cropCycleSchema = new Schema({
+  // REVERSAL. Archiving hides a holding without destroying it, so "undo" is a real
+  // undo: the id, the planting date and the links to its own logs all survive. A
+  // destroy-and-recreate undo would lose all three, and would leave the farmer's
+  // history pointing at a row that no longer exists.
+  //
+  // Nothing is ever hard-deleted by the app. Reversal is reversible.
+  archivedAt: { type: Date, default: null },
   farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
   plotId: { type: Schema.Types.ObjectId, ref: 'Plot', index: true },
   crop: { type: String, required: true },       // maize, beans, napier, kale…
@@ -128,6 +142,13 @@ const cropCycleSchema = new Schema({
 
 // ── ANIMALS ───────────────────────────────────────────────────────────────────
 const animalGroupSchema = new Schema({
+  // REVERSAL. Archiving hides a holding without destroying it, so "undo" is a real
+  // undo: the id, the planting date and the links to its own logs all survive. A
+  // destroy-and-recreate undo would lose all three, and would leave the farmer's
+  // history pointing at a row that no longer exists.
+  //
+  // Nothing is ever hard-deleted by the app. Reversal is reversible.
+  archivedAt: { type: Date, default: null },
   farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
   species: { type: String, required: true },    // cattle | goats | sheep | layers | broilers | pigs | bees
   label: { type: String, default: '' },         // 'the dairy cows'
@@ -135,6 +156,10 @@ const animalGroupSchema = new Schema({
   productionKind: { type: String, default: '' },// milk | eggs | none
   active: { type: Boolean, default: true },
 }, { timestamps: true });
+
+plotSchema.index({ farmId: 1, archivedAt: 1 });
+cropCycleSchema.index({ farmId: 1, archivedAt: 1 });
+animalGroupSchema.index({ farmId: 1, archivedAt: 1 });
 
 const animalSchema = new Schema({
   farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
