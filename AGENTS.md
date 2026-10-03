@@ -2,6 +2,16 @@
 
 Mirrors the LoopKeeper (`rolodex-server`) conventions deliberately. Read this before changing anything.
 
+> **THE PRODUCT FRAMEWORK LIVES IN THE OTHER REPO.**
+> `D:\MacBook\noGoogle\farmline-app\AGENTS.md` §1 is the anchor: where the product came from (the
+> three gaps a real farmer named in FarmKeep), who it is for, the prime directive, the definition of
+> the first screen, the seven layers and their build order, the two faces, the trust architecture,
+> voice, language and visual language.
+>
+> **Read that section before designing anything, in either repo.** It outranks this file. Nothing
+> here should be built that is not traceable to §1.1 or §1.5 of it — and a screen is not done when a
+> route returns 200 (§1.13).
+
 ## THE STACK — this repo is the API. The app is a separate repo.
 
 **This process serves the API only.** It has no frontend, no static handler and no
