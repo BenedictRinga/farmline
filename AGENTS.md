@@ -2,6 +2,29 @@
 
 Mirrors the LoopKeeper (`rolodex-server`) conventions deliberately. Read this before changing anything.
 
+## THE STACK — read this first, it is not what LoopKeeper is
+
+**farmline is NOT Angular.** There is no frontend framework, no bundler, no compile step, and no
+`node_modules` on the frontend side at all.
+
+| | LoopKeeper | farmline |
+|---|---|---|
+| Frontend | **Angular** (`rolodex-app`, `ng serve` :4400, `ng build` → bundle) | **one hand-written HTML file**, vanilla JS — `public/index.html` (~43 KB) |
+| Frontend dependencies | Angular, Ionic, Capacitor, thousands of packages | **zero** |
+| Build step | yes — `ng build`, post-build `scripts/*.cjs` fixers | **none** — the file is served as written |
+| Backend | Node/Express/Mongoose (`rolodex-server` :4411) | Node/Express/Mongoose (`:4600`) — same pattern |
+| Backend dependencies | express, mongoose, socket.io, stripe | **express + mongoose only** |
+
+The frontend is served **by the backend process itself** (`express.static` at `BASE_PATH`). That is
+why there is one dev server and not two.
+
+**Why vanilla, and what it costs.** The target is a farmer on a cheap Android phone on rural 2G:
+a 43 KB file that renders in under a second beats a framework bundle by an order of magnitude, and
+a build step is one more thing that can go stale between what you edited and what runs. The cost is
+real and should be stated: no components, no typed templates, no framework tooling. If farmline
+ever grows a team or the UI triples in size, that trade should be re-examined deliberately — not
+drifted into. Do not add a framework to `public/index.html` without the founder's explicit decision.
+
 ## Repo rules
 - **YARN ONLY.** Never use npm here.
 - The full gate before committing: `yarn release` (= `check` → `build` → `smoke`).
@@ -22,10 +45,20 @@ and the API are the **same origin on the same port**. There is no second dev ser
 no CORS to configure.
 
 ```bash
-yarn dev          # :4600, nodemon-style watch on src/
-                  # then open  http://localhost:4600/farmline/
-yarn seed         # fills a farm so you are not debugging an empty one
+yarn dev          # starts :4600 AND OPENS THE BROWSER at the app
+yarn seed         # (second terminal) fills a farm so you are not debugging an empty one
 ```
+
+`yarn dev` runs `scripts/dev.cjs` — farmline's equivalent of `ng serve --open`. LoopKeeper got that
+flag for free; here it had to be written. It starts the watcher, waits for `/health`, prints the
+env/db/build, then opens `http://localhost:4600/farmline/`. `NO_OPEN=1 yarn dev` suppresses the
+browser.
+
+If a farmline server is **already** on the port, it says so and opens the browser at that one
+instead of starting a second — a duplicate server silently answering with old code is the worst dev
+failure there is, and it cost real time three times during this build.
+
+`yarn serve` is the plain one (`node src/index.js`): no watch, no browser. Use it for scripts.
 
 | | LoopKeeper | farmline |
 |---|---|---|

@@ -1,22 +1,22 @@
 {
   "name": "farmline-server",
-  "version": "0.1.5",
-  "build": 6,
+  "version": "0.1.6",
+  "build": 7,
   "private": true,
   "description": "farmline — farmer-first farm management, from hobby to full-time. Two faces (farmer + customer) over one record system. YARN ONLY (no npm).",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "dev": "node scripts/dev.cjs",
     "preflight": "node scripts/preflight.cjs",
-    "check": "node --check src/index.js && node --check src/schedule.js && node --check src/projection.js && node --check src/money.js && node --check src/ladder.js && node --check scripts/preflight.cjs && node --check scripts/smoke.cjs && node --check scripts/write-build.cjs && node --check scripts/verify-live.cjs && node --check scripts/seed.cjs",
+    "check": "node --check src/index.js && node --check src/schedule.js && node --check src/projection.js && node --check src/money.js && node --check src/ladder.js && node --check scripts/preflight.cjs && node --check scripts/smoke.cjs && node --check scripts/write-build.cjs && node --check scripts/verify-live.cjs && node --check scripts/seed.cjs && node --check scripts/dev.cjs",
     "build": "node scripts/write-build.cjs",
     "smoke": "node scripts/smoke.cjs",
     "test": "node test/integration.js",
     "verify": "node scripts/verify-live.cjs",
     "release": "yarn check && yarn build && yarn smoke",
     "seed": "node scripts/seed.cjs",
-    "dev:seed": "node scripts/seed.cjs"
+    "serve": "node src/index.js"
   },
   "engines": {
     "node": ">=20"
