@@ -48,8 +48,14 @@ function portFree() {
   process.on('SIGINT', () => { stop(); process.exit(130); });
 
   // Wait for /health rather than sleeping a fixed number of seconds.
+  //
+  // BUDGET: 150s. It was 30s, and that failed on this machine — a boot takes ~48s
+  // when two other Angular dev servers are running (zyppar runs `ng serve --poll
+  // 2000`, which is heavy). A short budget turns a slow machine into a RED build and
+  // sends you hunting a bug in code that is fine. A genuine hang never becomes
+  // healthy, so a generous ceiling costs nothing but wall-clock on real failures.
   let up = false;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 300; i++) {
     await new Promise((r) => setTimeout(r, 500));
     try {
       const r = await fetch(BASE + '/health');

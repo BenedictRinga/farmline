@@ -133,7 +133,9 @@ function portInUse() {
 
   // ── wait for health, then open ─────────────────────────────────────────────
   let up = null;
-  for (let i = 0; i < 40; i++) {
+  // 150s ceiling: a boot takes ~48s on a loaded machine. 16s produced a false "did not
+  // come up" that looked like a code error.
+  for (let i = 0; i < 300; i++) {
     await new Promise((r) => setTimeout(r, 400));
     if (child.exitCode !== null) break;
     up = await farmlineOn();

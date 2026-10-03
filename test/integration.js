@@ -90,7 +90,37 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(done.body.hold.affects.includes('milk'), 'the hold affects MILK');
     assert(done.body.hold.days === 3, `withdrawal is ${done.body.hold.days} days (per the protocol)`);
     assert(done.body?.nextEventId, 'the next occurrence was scheduled');
+
+    // ── THE SECOND COMPLETION — the crash regression ──────────────────────────
+    // Completing ONE event worked. Completing a SECOND killed the server:
+    // E11000 on farmId_1_clientId_1 with clientId: "". The index is sparse, and
+    // sparse skips MISSING fields — but the schema defaulted clientId to '', which
+    // is a present value, so the two logs collided. This is the primary action of
+    // the whole product, so it gets its own assertion.
+    const other = due.find((e) => String(e._id) !== String(deworm._id));
+    if (other) {
+      const second = await req('POST', `/farm/${farmId}/events/${other._id}/complete`, { token, body: {} });
+      assert(second.status === 200, `a SECOND event completes without colliding (${second.status})`);
+      assert(second.body?.logId, 'the second completion wrote a record');
+    } else {
+      warn('only one due event — the double-completion regression is not covered this run');
+    }
   }
+
+  console.log('\n=== 5b. LAYER 1 — what do I have? ===');
+  const inv = await req('GET', `/farm/${farmId}/inventory`, { token });
+  assert(inv.status === 200, 'inventory fetched');
+  assert(inv.body?.summary, 'it carries a summary');
+  assert(Array.isArray(inv.body.animalGroups) && inv.body.animalGroups.length > 0,
+    `${inv.body?.animalGroups?.length} animal group(s) — animals are visible, not just scheduled`);
+  assert(Array.isArray(inv.body.plots), 'plots are returned');
+  assert(inv.body.summary.animals === 12 || inv.body.summary.animals > 0,
+    `the summary counts the herd (${inv.body?.summary?.animals} animals)`);
+  assert(inv.body.animalGroups.some((g) => 'next' in g),
+    'each group carries the NEXT thing due to it — "what I have" and "what is coming" answer together');
+  assert(inv.body.summary.isSetUp === true, 'isSetUp is true once the farm has holdings');
+  // Animals and crops are SIBLINGS on this screen (framework §1.1 gap 1: crops too).
+  assert('cropsWithoutPlot' in inv.body, 'crops are first-class on the same payload as animals');
 
   console.log('\n=== 6. LOG milk -> the shop stock rises (the projection) ===');
   const sell = await req('POST', `/farm/${farmId}/sellables`, {

@@ -74,7 +74,8 @@ const shapeMessage = (m) => ({
   fromLabel: m.fromLabel || '',
   body: m.body,
   at: m.at,
-  clientId: m.clientId || '',
+  // ABSENT, not '' — see the note on logSchema.clientId in models.js.
+  clientId: m.clientId || undefined,
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -222,6 +223,143 @@ api.post('/farm/:farmId/crops', auth.requireAuth('farmer'), auth.requireFarmScop
   return ok(res, { cycle, scheduled: built.created });
 }));
 
+// ──────────────────────────────────────────────────────────────────────────────
+// LAYER 1 — WHAT DO I HAVE?
+// ──────────────────────────────────────────────────────────────────────────────
+// The answer to the first question in the framework, and the thing that had no
+// screen: the farmer's ANIMALS and their CROPS, as entities they own and manage.
+// Not as rows on a task list, and not as products on a shelf.
+//
+// One call, because the screen is one screen, and because a farmer on a phone
+// should not wait for four round trips to find out what is on their own farm.
+//
+// Read-only, and deliberately shaped for the farmer: every subject carries the next
+// thing due to it, so "what I have" and "what is coming" are answered together. A
+// holding with nothing due is as much an answer as one with work.
+api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const farmId = req.params.farmId;
+  const now = new Date();
+
+  const [farmDoc, plots, cycles, groups, animals, openEvents, holds] = await Promise.all([
+    Farm.findById(farmId).select('name slug rung').lean(),
+    Plot.find({ farmId }).sort({ name: 1 }).lean(),
+    CropCycle.find({ farmId }).sort({ plantedOn: -1 }).lean(),
+    AnimalGroup.find({ farmId, active: true }).sort({ species: 1 }).lean(),
+    Animal.find({ farmId }).lean(),
+    // Only what is still outstanding. Completed and abandoned history is Layer 2+.
+    ScheduledEvent.find({ farmId, status: { $in: ['due', 'carried'] } })
+      .select('subjectType subjectId subjectLabel intervention dueOn baseline withdrawal')
+      .lean(),
+    Hold.find({ farmId, until: { $gt: now } })
+      .select('subjectId subjectLabel affects product until days').lean(),
+  ]);
+
+  // The soonest outstanding event per subject. Doing this once in memory beats a query
+  // per plot and per group, and a farm is small by construction.
+  const nextBySubject = new Map();
+  for (const ev of openEvents) {
+    const key = String(ev.subjectId);
+    const prev = nextBySubject.get(key);
+    if (!prev || new Date(ev.dueOn) < new Date(prev.dueOn)) nextBySubject.set(key, ev);
+  }
+  const holdsBySubject = new Map();
+  for (const h of holds) {
+    const key = String(h.subjectId);
+    if (!holdsBySubject.has(key)) holdsBySubject.set(key, []);
+    holdsBySubject.get(key).push({ affects: h.affects, product: h.product, until: h.until, days: h.days });
+  }
+
+  const shapeNext = (subjectId) => {
+    const ev = nextBySubject.get(String(subjectId));
+    if (!ev) return null;
+    // Negative means overdue. The app decides how loudly to say so; the API reports
+    // the truth rather than clamping it to zero.
+    const inDays = Math.round((new Date(ev.dueOn) - now) / 86400000);
+    return {
+      id: ev._id, intervention: ev.intervention, dueOn: ev.dueOn,
+      inDays, overdue: inDays < 0, isBaseline: !!ev.baseline,
+      withdrawal: ev.withdrawal || null,
+    };
+  };
+
+  // Crops hang off their plot, because that is how a farmer thinks about them.
+  const cropsByPlot = new Map();
+  const unplaced = [];
+  for (const c of cycles) {
+    const shaped = {
+      _id: c._id, crop: c.crop, variety: c.variety, acres: c.acres, season: c.season,
+      status: c.status, plantedOn: c.plantedOn, expectedHarvest: c.expectedHarvest,
+      fodderFor: c.fodderFor || '',
+      daysGrowing: c.plantedOn ? Math.max(0, Math.round((now - new Date(c.plantedOn)) / 86400000)) : null,
+      harvested: c.yield && c.yield.quantity
+        ? { quantity: c.yield.quantity, unit: c.yield.unit, on: c.yield.harvestedOn } : null,
+      next: shapeNext(c._id),
+      holds: holdsBySubject.get(String(c._id)) || [],
+    };
+    if (c.plotId) {
+      const key = String(c.plotId);
+      if (!cropsByPlot.has(key)) cropsByPlot.set(key, []);
+      cropsByPlot.get(key).push(shaped);
+    } else {
+      unplaced.push(shaped);
+    }
+  }
+
+  const animalsByGroup = new Map();
+  for (const a of animals) {
+    if (!a.groupId) continue;
+    const key = String(a.groupId);
+    if (!animalsByGroup.has(key)) animalsByGroup.set(key, []);
+    animalsByGroup.get(key).push({
+      _id: a._id, name: a.name, tag: a.tag, sex: a.sex, bornOn: a.bornOn,
+      weightKg: a.weightKg, status: a.status, salePrice: a.salePrice,
+      ageMonths: a.bornOn ? Math.floor((now - new Date(a.bornOn)) / (86400000 * 30.44)) : null,
+    });
+  }
+
+  const shapedPlots = plots.map((p) => ({
+    _id: p._id, name: p.name, acres: p.acres, soil: p.soil, water: p.water, notes: p.notes,
+    crops: cropsByPlot.get(String(p._id)) || [],
+  }));
+
+  const shapedGroups = groups.map((g) => {
+    const members = animalsByGroup.get(String(g._id)) || [];
+    return {
+      _id: g._id, species: g.species, label: g.label, count: g.count,
+      productionKind: g.productionKind,
+      // The tracked individuals, when the farmer keeps them. Many do not, and an empty
+      // list is not an error — the COUNT is still the truth.
+      animals: members,
+      tracked: members.length,
+      next: shapeNext(g._id),
+      holds: holdsBySubject.get(String(g._id)) || [],
+    };
+  });
+
+  return ok(res, {
+    farm: farmDoc || null,
+    summary: {
+      plots: shapedPlots.length,
+      acres: Math.round(shapedPlots.reduce((s, p) => s + (p.acres || 0), 0) * 100) / 100,
+      crops: cycles.length,
+      growing: cycles.filter((c) => c.status === 'growing').length,
+      animalGroups: shapedGroups.length,
+      animals: shapedGroups.reduce((s, g) => s + (g.count || 0), 0),
+      species: shapedGroups.map((g) => g.species),
+      production: [...new Set(shapedGroups.map((g) => g.productionKind).filter(Boolean))],
+      activeHolds: holds.length,
+      // The honest empty state: a farm with nothing here needs SETUP, and the app must
+      // not render an empty dashboard as though everything were fine.
+      isSetUp: shapedPlots.length > 0 || shapedGroups.length > 0,
+    },
+    plots: shapedPlots,
+    animalGroups: shapedGroups,
+    // Crops with no plot: a real case, and hiding them would lose the farmer's data.
+    cropsWithoutPlot: unplaced,
+    at: now,
+  });
+}));
+
 api.post('/farm/:farmId/sellables', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const {
     product, label = '', labelSw = '', icon = '', unit = '', unitSw = '',
@@ -281,7 +419,7 @@ api.post('/farm/:farmId/logs', auth.requireAuth('farmer'), auth.requireFarmScope
       amountKES: Number(r.amountKES) || 0,
       buyer: r.buyer || '',
       note: r.note || '',
-      clientId: r.clientId || '',
+      clientId: r.clientId || undefined,
       deviceAt: r.deviceAt ? new Date(r.deviceAt) : null,
     });
     accepted.push({ id: doc._id });
@@ -391,7 +529,7 @@ api.post('/conversations/:id/messages', auth.requireAuth('farmer', 'customer'), 
   const label = principal.type === 'farmer' ? conv.farmLabel : conv.customerLabel;
   const out = await chat.postMessage({
     conversationId: conv._id, fromType: principal.type, fromId: principal.id,
-    fromLabel: label, body: req.body?.body, clientId: req.body?.clientId || '',
+    fromLabel: label, body: req.body?.body, clientId: req.body?.clientId || undefined,
   });
   if (!out.ok) return bad(res, 400, out.error);
   return ok(res, { message: shapeMessage(out.message), duplicate: !!out.duplicate });
@@ -675,10 +813,17 @@ const http = require('http');
 const server = http.createServer(app);
 const io = chat.attach(server);
 
+// Fix the legacy offline-idempotency indexes BEFORE accepting traffic. The old
+// `sparse` index treated a null clientId as a duplicate, so the second "mark done" of
+// the day answered 500. MongoDB cannot change an index in place, so the wrong one has
+// to be dropped first — and mongoose rebuilds it correctly on connect.
+const { migrateLegacyIndexes } = require('./models');
+
 server.listen(config.port, () => {
   console.log(`farmline server on :${config.port}  (app at ${config.basePath}/, api at ${config.apiPrefix}/)`);
   console.log(`  dbName=${config.dbName}  auth=${auth.authArmed ? 'ARMED' : 'OPEN (set AUTH_SECRET)'}  money=${config.moneyMode}  mpesa=${money.mpesaConfigured() ? 'configured' : 'not armed'}`);
   console.log(`  chat=${io ? 'socket.io at /socket-farmline/ (+ REST)' : 'REST only (socket.io not installed)'}  env=${config.envName}`);
+  migrateLegacyIndexes().catch((e) => console.warn('[farmline] index migration error:', e.message));
 });
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {

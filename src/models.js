@@ -203,11 +203,28 @@ const logSchema = new Schema({
   note: { type: String, default: '' },
   scheduledEventId: { type: Schema.Types.ObjectId, ref: 'ScheduledEvent', default: null },
 
-  // Offline-first: the client mints these, so a replayed batch is idempotent.
-  clientId: { type: String, default: '', index: true },
+  // OFFLINE-FIRST: the client mints these, so a replayed batch is idempotent.
+  //
+  // THE DEFAULT MUST BE ABSENT, NOT ''. This was `default: ''` and it crashed the
+  // server: the index below is `sparse`, and sparse skips documents where the field
+  // is MISSING — an empty string is a present value, so the second Log ever written
+  // without a clientId collided on `farmId_1_clientId_1` with `clientId: ""`.
+  // That killed the process on the second "mark done" of the day, which is the
+  // primary action of the whole product. Normalised at every creation site too
+  // (see `normaliseClientId`), because a database that already has the old index
+  // will not be fixed by a schema change alone.
+  clientId: { type: String, index: true },
   deviceAt: { type: Date, default: null },
 }, { timestamps: true });
-logSchema.index({ farmId: 1, clientId: 1 }, { unique: true, sparse: true });
+// PARTIAL, not sparse. 'sparse' omits MISSING fields only — a document with
+// clientId: null is still indexed, so the second log written without a clientId
+// collided on this index and returned 500. That is the primary action of the app:
+// marking a job done. This expression covers only real, non-empty string clientIds,
+// which is exactly what offline idempotency is about.
+logSchema.index(
+  { farmId: 1, clientId: 1 },
+  { unique: true, partialFilterExpression: { clientId: { $type: 'string', $gt: '' } } },
+);
 
 // ── THE HOLD (withdrawal). --alert on screen is spent on this and nothing else ─
 const holdSchema = new Schema({
@@ -352,15 +369,68 @@ const messageSchema = new Schema({
   at: { type: Date, default: Date.now, index: true },
   // Offline-tolerant: the app may send a message that was composed with no signal.
   // Same idempotency contract as Logs — a replay must not post twice.
-  clientId: { type: String, default: '' },
+  // ABSENT, not '', for the same reason as the log: `sparse` skips MISSING fields,
+  // and an empty string is present. This would have crashed the SECOND message in
+  // every conversation.
+  clientId: { type: String },
   readByFarmer: { type: Boolean, default: false },
   readByCustomer: { type: Boolean, default: false },
 }, { timestamps: true });
 
-messageSchema.index({ conversationId: 1, clientId: 1 }, { unique: true, sparse: true });
+// PARTIAL for the same reason as the log index above: with the old sparse index the
+// SECOND message in any conversation collided on a null clientId.
+messageSchema.index(
+  { conversationId: 1, clientId: 1 },
+  { unique: true, partialFilterExpression: { clientId: { $type: 'string', $gt: '' } } },
+);
+
+/**
+ * Drop the LEGACY offline-idempotency indexes so they can be rebuilt correctly.
+ *
+ * THE BUG THIS MIGRATES AWAY FROM: `{ farmId, clientId }` was declared `sparse: true`,
+ * and a sparse index only omits documents where the field is MISSING. Mongoose stored
+ * `null` for an unset clientId, and `null` is very much present — so the SECOND log
+ * ever written without a clientId collided on `farmId_1_clientId_1` and the server
+ * threw a 500. The second "mark done" of the day killed the process. That is the
+ * primary action of the entire product.
+ *
+ * The index now uses a partialFilterExpression, which is precise about what it covers:
+ * only real, non-empty clientIds are subject to uniqueness. Everything else is simply
+ * not in the index.
+ *
+ * MongoDB will not change an index in place, so the old one has to be removed. This
+ * runs at boot, matches the exact legacy shape, and SAYS SO — a silent index drop
+ * would be its own kind of bug. Rebuild is automatic (mongoose autoIndex).
+ */
+async function migrateLegacyIndexes() {
+  const legacy = [
+    { collection: 'logs', name: 'farmId_1_clientId_1' },
+    { collection: 'messages', name: 'conversationId_1_clientId_1' },
+  ];
+  for (const { collection, name } of legacy) {
+    try {
+      const coll = conn.collection(collection);
+      const indexes = await coll.indexes().catch(() => []);
+      const found = indexes.find((i) => i.name === name);
+      if (!found) continue;
+      const isSparse = found.sparse === true;
+      const hasPartial = !!found.partialFilterExpression;
+      if (isSparse && !hasPartial) {
+        await coll.dropIndex(name);
+        console.log(`[farmline] migrated: dropped the legacy sparse index ${collection}.${name}`);
+        console.log('           (it treated null clientIds as duplicates — see migrateLegacyIndexes)');
+      }
+    } catch (e) {
+      // Never block boot on a migration. A failure here means the old index stays and
+      // writes may collide — loud, but not fatal, and the log says exactly that.
+      console.warn(`[farmline] index migration could not run for ${collection}.${name}: ${e.message}`);
+    }
+  }
+}
 
 module.exports = {
   conn,
+  migrateLegacyIndexes,
   Farm: conn.model('Farm', farmSchema),
   Member: conn.model('Member', memberSchema),
   Customer: conn.model('Customer', customerSchema),
