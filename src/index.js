@@ -241,7 +241,10 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
   const now = new Date();
 
   const [farmDoc, plots, cycles, groups, animals, openEvents, holds] = await Promise.all([
-    Farm.findById(farmId).select('name slug rung').lean(),
+    // The header needs the farm's IDENTITY, not just its name — this is the screen
+    // that has to feel like the farmer's own place. Photography is the strongest trust
+    // signal we have (framework §1.8), so the photos come with it.
+    Farm.findById(farmId).select('name slug rung area county story photos verifiedFarm').lean(),
     Plot.find({ farmId }).sort({ name: 1 }).lean(),
     CropCycle.find({ farmId }).sort({ plantedOn: -1 }).lean(),
     AnimalGroup.find({ farmId, active: true }).sort({ species: 1 }).lean(),
