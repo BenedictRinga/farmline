@@ -87,6 +87,12 @@ const config = {
     env: envVar('MPESA_ENV', 'sandbox'),
   },
 
+  // WHERE THE PUBLIC WORLD CAN REACH US. Daraja needs an https URL to POST the
+  // payment result to, so this must be the real host, not localhost — a callback
+  // pointed at localhost silently never arrives and the order stays pending
+  // forever with the buyer's money already gone.
+  publicUrl: envVar('FARMLINE_PUBLIC_URL', 'https://zyppar.com'),
+
   /** Admin gate — same shape as rolodex-server's config.checkAdminKey. */
   checkAdminKey(key) {
     const expected = envVar('FARMLINE_ADMIN_KEY');

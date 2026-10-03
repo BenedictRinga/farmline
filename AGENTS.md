@@ -33,8 +33,41 @@ drifted into. Do not add a framework to `public/index.html` without the founder'
 - The server talks to its **own `farmline` Mongo database**. **Never touch the `zyppar` or `rolodex` databases.**
   `yarn preflight` fails the run if the URI points anywhere else.
 - Plain CommonJS. No TypeScript, no build step, no bundler.
-- **Dependencies stay at two** (express, mongoose). Anything else needs the founder's explicit approval.
-  The frontend is a single static HTML file with zero dependencies — keep it that way.
+- **Dependencies stay at three** (express, mongoose, socket.io) after the founder's explicit approval
+  of chat on 2026-10-03 (build 8). `socket.io-client` is a **devDependency** — it exists only so
+  `test/chat-money.js` can prove real-time delivery. A fourth runtime dependency still needs approval.
+
+## CHAT and MONEY — the two doors added in build 8
+
+### Chat (`src/chat.js`, socket.io at `/socket-farmline/`)
+Farmer ↔ buyer, one thread per (farm, customer) pair. **Not** LoopKeeper's demo room: that has no
+auth and no persistence, and messages die with the tabs. Here every message is **persisted**, every
+socket is **authenticated** with the same HMAC token as the REST API, and a participant can only
+reach their own threads.
+
+**REST is a peer, not a fallback.** Every message is postable and readable over REST as well as the
+socket. Socket chat fails invisibly on a weak connection — the message simply never arrives — so a
+phone that lost its socket must still be able to read and send.
+
+The nginx path is **namespaced** (`/socket-farmline/`): Zyppar owns `/socket.io`, LoopKeeper owns
+`/socket-rolodex/`, and a shared path would not fail loudly — it would deliver one product's events
+to another. The socket block's `Upgrade`/`Connection` headers and long timeouts are load-bearing;
+without them chat silently degrades to long-polling.
+
+### M-Pesa (`src/mpesa.js`, called only from `src/money.js`)
+Safaricom Daraja: OAuth (cached ~1h), STK push, callback parsing. **Zyppar gave us nothing to copy —
+its payments are Stripe/PayPal in USD for topping up ZU, and a Kenyan farmer cannot buy ZU.**
+
+THE RULE THIS FILE EXISTS TO KEEP: **farmline never custodies money.** The STK push pays the FARM's
+own shortcode; farmline records the receipt. A farm may carry its own Daraja credentials, and that
+is the model to prefer.
+
+**An unarmed rail must never report success.** It returns `pending` with the reason. A fabricated
+payment confirmation is the worst bug this codebase could ship — silent, and about somebody's income.
+Only the Daraja **callback** settles a payment (`settleByCheckout`, matched on `CheckoutRequestID`).
+
+`FARMLINE_PUBLIC_URL` must be the real public host: Daraja POSTs the result there, and a callback
+pointed at localhost silently never arrives while the buyer's money is already gone.
 
 ## DEV — how the two faces are run locally
 

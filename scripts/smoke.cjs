@@ -72,11 +72,13 @@ function portFree() {
     stop(); process.exit(1);
   }
 
-  // Two suites, in order:
+  // Three suites, in order:
   //   1. integration.js  — does the server BEHAVE?
-  //   2. ui-contract.js  — can public/index.html READ what the server says?
-  // The second exists because a renamed field passes every server test and shows
-  // the farmer an empty screen. It already caught two such bugs.
+  //   2. ui-contract.js  — can the app READ what the server says?
+  //   3. chat-money.js   — do the two new doors work, and is the money rail honest?
+  // The second exists because a renamed field passes every server test and shows the
+  // farmer an empty screen. The third exists because chat can fail invisibly and a
+  // fabricated payment is the worst bug this codebase could ship.
   const run = (file) => new Promise((resolve) => {
     const t = spawn(process.execPath, [path.join(ROOT, 'test', file)], {
       cwd: ROOT,
@@ -88,7 +90,8 @@ function portFree() {
 
   const a = await run('integration.js');
   const b = await run('ui-contract.js');
-  const code = (a === 0 && b === 0) ? 0 : 1;
+  const c = await run('chat-money.js');
+  const code = (a === 0 && b === 0 && c === 0) ? 0 : 1;
 
   stop();
   await new Promise((r) => setTimeout(r, 300));

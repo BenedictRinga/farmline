@@ -284,6 +284,14 @@ const ledgerSchema = new Schema({
   ref: { type: String, default: '' },
   status: { type: String, enum: ['pending', 'settled', 'failed'], default: 'pending' },
   note: { type: String, default: '' },
+  // ── M-PESA (Daraja) ─────────────────────────────────────────────────────────
+  // The callback arrives keyed on CheckoutRequestID, which is the ONLY handle that
+  // exists between "we asked the buyer for money" and "the money moved". A receipt
+  // number does not exist until the buyer has entered their PIN, so a pending entry
+  // cannot be matched by receipt — it has to be matched by this.
+  checkoutRequestId: { type: String, default: '', index: true },
+  mpesaReceipt: { type: String, default: '' },
+  settledAt: { type: Date, default: null },
 }, { timestamps: true });
 
 // ── PRICE OBSERVATIONS (market awareness, Rung 3+) ────────────────────────────
@@ -296,6 +304,60 @@ const priceSchema = new Schema({
   source: { type: String, enum: ['farmer', 'buyer', 'market', 'amis'], default: 'farmer' },
   observedAt: { type: Date, default: Date.now, index: true },
 }, { timestamps: true });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CONVERSATIONS — the farmer and the buyer actually talking
+// ══════════════════════════════════════════════════════════════════════════════
+// LoopKeeper's chat (rolodex-server) is a DEMO ROOM: a room code, no auth, no
+// persistence — messages exist only while both browsers are open. That shape is
+// wrong here, and the difference matters:
+//
+//   · A farm↔buyer conversation is about a real order. It must survive a reload, a
+//     device change, and a gap of days — a buyer asking "is the milk still held?"
+//     needs the answer to still be there tomorrow.
+//   · It must be SCOPED. A customer may only reach conversations they are part of;
+//     without that, one buyer reads another's thread.
+//   · It is a RECORD. If there is ever a dispute about what was agreed, the thread
+//     is the evidence. Demo rooms can forget; a marketplace cannot.
+//
+// So: authenticated participants, persisted messages, one conversation per
+// (farm, customer) pair, optionally anchored to the order that started it.
+const conversationSchema = new Schema({
+  farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true, index: true },
+  // The order that opened the thread, when one did. A conversation may predate an
+  // order (an enquiry) and outlive it (after-sales).
+  orderId: { type: Schema.Types.ObjectId, ref: 'Order', default: null, index: true },
+  // Denormalised for list rendering without a populate round-trip.
+  farmLabel: { type: String, default: '' },
+  customerLabel: { type: String, default: '' },
+  lastMessageAt: { type: Date, default: Date.now, index: true },
+  lastMessageText: { type: String, default: '' },
+  // Read position per side — cheap unread counts without scanning messages.
+  farmerReadAt: { type: Date, default: null },
+  customerReadAt: { type: Date, default: null },
+  closed: { type: Boolean, default: false },
+}, { timestamps: true });
+
+// One thread per farm+buyer. Re-opening from a new order continues the same thread
+// rather than fragmenting the history.
+conversationSchema.index({ farmId: 1, customerId: 1 }, { unique: true });
+
+const messageSchema = new Schema({
+  conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true, index: true },
+  fromType: { type: String, enum: ['farmer', 'customer'], required: true },
+  fromId: { type: Schema.Types.ObjectId, required: true },
+  fromLabel: { type: String, default: '' },
+  body: { type: String, required: true, trim: true, maxlength: 2000 },
+  at: { type: Date, default: Date.now, index: true },
+  // Offline-tolerant: the app may send a message that was composed with no signal.
+  // Same idempotency contract as Logs — a replay must not post twice.
+  clientId: { type: String, default: '' },
+  readByFarmer: { type: Boolean, default: false },
+  readByCustomer: { type: Boolean, default: false },
+}, { timestamps: true });
+
+messageSchema.index({ conversationId: 1, clientId: 1 }, { unique: true, sparse: true });
 
 module.exports = {
   conn,
@@ -313,4 +375,6 @@ module.exports = {
   Order: conn.model('Order', orderSchema),
   Ledger: conn.model('Ledger', ledgerSchema),
   PriceObservation: conn.model('PriceObservation', priceSchema),
+  Conversation: conn.model('Conversation', conversationSchema),
+  Message: conn.model('Message', messageSchema),
 };

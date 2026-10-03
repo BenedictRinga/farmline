@@ -17,6 +17,8 @@ const auth = require('./auth');
 const vocab = require('./vocab');
 const ladder = require('./ladder');
 const money = require('./money');
+const mpesa = require('./mpesa');
+const chat = require('./chat');
 const schedule = require('./schedule');
 const projection = require('./projection');
 const protocols = require('./protocols');
@@ -50,6 +52,30 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   if (!res.headersSent) res.status(500).json({ ok: false, error: e?.message || 'failed' });
 });
 const slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
+
+// ── chat shapes ───────────────────────────────────────────────────────────────
+// Sent to the app rather than raw Mongo documents: `_id` as a string (the Angular
+// client treats it as an opaque id), and only the fields a thread needs. Never the
+// raw customer document — a buyer does not get to see another buyer's phone number.
+const shapeConversation = (c) => ({
+  _id: String(c._id),
+  farmId: String(c.farmId),
+  orderId: c.orderId ? String(c.orderId) : null,
+  farmLabel: c.farmLabel || '',
+  customerLabel: c.customerLabel || '',
+  lastMessageAt: c.lastMessageAt,
+  lastMessageText: c.lastMessageText || '',
+  closed: !!c.closed,
+});
+const shapeMessage = (m) => ({
+  _id: String(m._id),
+  conversationId: String(m.conversationId),
+  fromType: m.fromType,
+  fromLabel: m.fromLabel || '',
+  body: m.body,
+  at: m.at,
+  clientId: m.clientId || '',
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // HEALTH / VERSION
@@ -320,6 +346,84 @@ api.post('/farm/:farmId/orders/:orderId/stage', auth.requireAuth('farmer'), auth
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
+// CHAT — farmer ↔ buyer (src/chat.js). Real-time over socket.io, and ALWAYS
+// available over REST so a phone that lost its socket can still read and send.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Open (or continue) the thread with a farm. Customer-initiated, from the shop. */
+api.post('/conversations', auth.requireAuth('customer'), wrap(async (req, res) => {
+  const slug = String(req.body?.slug || '').trim();
+  const farm = slug
+    ? await Farm.findOne({ slug }).select('_id')
+    : (req.body?.farmId ? await Farm.findById(req.body.farmId).select('_id').catch(() => null) : null);
+  if (!farm) return bad(res, 404, 'farm not found');
+  const conv = await chat.openConversation({
+    farmId: farm._id, customerId: req.auth.sub, orderId: req.body?.orderId || null,
+  });
+  if (!conv) return bad(res, 404, 'could not open the conversation');
+  return ok(res, { conversation: shapeConversation(conv) });
+}));
+
+/** Every thread this principal is in — the farmer's inbox, or the buyer's. */
+api.get('/conversations', auth.requireAuth('farmer', 'customer'), wrap(async (req, res) => {
+  const principal = { type: req.auth.typ, id: req.auth.sub };
+  const rows = await chat.listFor(principal);
+  return ok(res, { conversations: rows });
+}));
+
+/** The messages. Scoped: a non-participant gets 403, not an empty thread. */
+api.get('/conversations/:id/messages', auth.requireAuth('farmer', 'customer'), wrap(async (req, res) => {
+  const principal = { type: req.auth.typ, id: req.auth.sub };
+  const conv = await chat.canAccess(req.params.id, principal);
+  if (!conv) return bad(res, 403, 'not your conversation');
+  const rows = await chat.history(conv._id, { limit: Number(req.query.limit) || 200 });
+  return ok(res, {
+    conversation: shapeConversation(conv),
+    messages: rows.map(shapeMessage),
+  });
+}));
+
+/** Send a message over REST. Same path as the socket — one write, two doors. */
+api.post('/conversations/:id/messages', auth.requireAuth('farmer', 'customer'), wrap(async (req, res) => {
+  const principal = { type: req.auth.typ, id: req.auth.sub };
+  const conv = await chat.canAccess(req.params.id, principal);
+  if (!conv) return bad(res, 403, 'not your conversation');
+  const label = principal.type === 'farmer' ? conv.farmLabel : conv.customerLabel;
+  const out = await chat.postMessage({
+    conversationId: conv._id, fromType: principal.type, fromId: principal.id,
+    fromLabel: label, body: req.body?.body, clientId: req.body?.clientId || '',
+  });
+  if (!out.ok) return bad(res, 400, out.error);
+  return ok(res, { message: shapeMessage(out.message), duplicate: !!out.duplicate });
+}));
+
+/** Mark this side's thread read. */
+api.post('/conversations/:id/read', auth.requireAuth('farmer', 'customer'), wrap(async (req, res) => {
+  const principal = { type: req.auth.typ, id: req.auth.sub };
+  const conv = await chat.canAccess(req.params.id, principal);
+  if (!conv) return bad(res, 403, 'not your conversation');
+  const at = await chat.markRead(conv._id, principal);
+  return ok(res, { readAt: at });
+}));
+
+// ══════════════════════════════════════════════════════════════════════════════
+// M-PESA CALLBACK — Safaricom posts here. NOT under /api/farmline auth: Daraja has
+// no bearer token, and the only thing that protects this route is that it can only
+// settle a pending entry whose CheckoutRequestID it already knows.
+// ══════════════════════════════════════════════════════════════════════════════
+api.post('/mpesa/callback', wrap(async (req, res) => {
+  const parsed = mpesa.parseCallback(req.body);
+  if (!parsed.checkoutRequestId) return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+
+  const out = await money.settleByCheckout(parsed.checkoutRequestId, parsed);
+  console.log(`[farmline] mpesa callback ${parsed.checkoutRequestId}: ${parsed.status}`
+    + `${parsed.receipt ? ' ' + parsed.receipt : ''}${out.matched ? '' : ' (no matching ledger entry)'}`);
+
+  // Daraja only needs a 200 with this envelope; it retries on anything else.
+  return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+}));
+
+// ══════════════════════════════════════════════════════════════════════════════
 // FARMER — the ladder (the self-deciding engine)
 // ─═════════════════════════════════════════════════════════════════════════════
 async function farmFacts(farmId) {
@@ -569,12 +673,24 @@ app.get('/', (_req, res) => res.redirect(config.basePath + '/'));
 app.use((req, res) => res.status(404).json({ ok: false, error: 'no such route', path: req.originalUrl }));
 
 // ── boot ──────────────────────────────────────────────────────────────────────
-const server = app.listen(config.port, () => {
+// http.createServer rather than app.listen, because socket.io needs to share the
+// same port as the API: one port, one origin, one TLS certificate, no second
+// nginx upstream. The chat path is namespaced (/socket-farmline/) so it cannot
+// collide with Zyppar's /socket.io or LoopKeeper's /socket-rolodex/ on this host.
+const http = require('http');
+const server = http.createServer(app);
+const io = chat.attach(server);
+
+server.listen(config.port, () => {
   console.log(`farmline server on :${config.port}  (app at ${config.basePath}/, api at ${config.apiPrefix}/)`);
   console.log(`  dbName=${config.dbName}  auth=${auth.authArmed ? 'ARMED' : 'OPEN (set AUTH_SECRET)'}  money=${config.moneyMode}  mpesa=${money.mpesaConfigured() ? 'configured' : 'not armed'}`);
+  console.log(`  chat=${io ? 'socket.io at /socket-farmline/ (+ REST)' : 'REST only (socket.io not installed)'}  env=${config.envName}`);
 });
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => { server.close(() => { conn.close().finally(() => process.exit(0)); }); });
+  process.on(sig, () => {
+    if (io) io.close();
+    server.close(() => { conn.close().finally(() => process.exit(0)); });
+  });
 }
 
 module.exports = app;
