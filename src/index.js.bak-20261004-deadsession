@@ -178,24 +178,8 @@ api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
 }));
 
 api.get('/me', auth.requireAuth('farmer'), wrap(async (req, res) => {
-  // DEAD SESSION vs DATA ANOMALY — the distinction the founder's report forced
-  // (2026-10-04: "We could not load your farm — farm not found", TRY AGAIN dead).
-  //
-  // The token's `sub` IS the farm id and `mid` IS the member credential. When a
-  // database is reset (or a farm is removed) the token still verifies — HMAC does
-  // not know the identity vanished — and every call then answers 404, which the
-  // app read as a retryable load error. The farmer sat on a dead screen with a
-  // TRY AGAIN button that re-fired the same dead call forever.
-  //
-  // THE HONEST ANSWER for a credential that no longer resolves is 401, not 404:
-  // the ONLY recovery is signing in again, and 401 is the one status the app
-  // already treats exactly that way (clear the token, walk to the door, say why).
-  // 404 stays for the genuine anomaly — a live member whose farm doc is missing.
-  const member = req.auth.mid ? await Member.findById(req.auth.mid).lean() : null;
-  if (!member) {
-    return res.status(401).json({ ok: false, error: 'this session no longer exists — sign in again' });
-  }
   const farm = await Farm.findById(req.auth.sub).lean();
+  const member = req.auth.mid ? await Member.findById(req.auth.mid).lean() : null;
   if (!farm) return bad(res, 404, 'farm not found');
   return ok(res, { farm, member, authArmed: auth.authArmed });
 }));
@@ -274,11 +258,6 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
     Hold.find({ farmId, until: { $gt: now } })
       .select('subjectId subjectLabel affects product until days').lean(),
   ]);
-
-  // A farm doc that does not resolve is a 404, never a 200 with farm:null.
-  // The soft shape made the app render an empty farm that looks like lost data;
-  // the honest answer sends the caller to the same recovery path as a dead session.
-  if (!farmDoc) return bad(res, 404, 'farm not found');
 
   // The soonest outstanding event per subject. Doing this once in memory beats a query
   // per plot and per group, and a farm is small by construction.
