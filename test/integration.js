@@ -29,8 +29,11 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
 
 (async () => {
   console.log('=== 0. health ===');
-  // health is at /health on the root
-  const hr = await fetch('http://localhost:4600/health').then((r) => r.json()).catch(() => null);
+  // health is at /health on the root. THIS suite's own base — never a hardcoded
+  // port. Under `yarn smoke` the suite runs against the smoke's own server (4699),
+  // and probing 4600 here asserts the health of a DIFFERENT server than the one
+  // these checks exercise — or fails outright when no dev server is running.
+  const hr = await fetch(ROOT + '/health').then((r) => r.json()).catch(() => null);
   assert(hr?.ok === true, 'server is up');
   console.log(`  info  db=${hr?.db} dbName=${hr?.dbName} auth=${hr?.authArmed ? 'ARMED' : 'OPEN'} money=${hr?.moneyMode}`);
   assert(hr?.dbName === 'farmline', 'connected to the farmline database (never zyppar/rolodex)');
@@ -239,6 +242,108 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   assert(eggItem && eggItem.available && eggItem.qty === 12, `eggs now show ${eggItem?.qty} available — logging raised stock`);
   assert(milkItem && milkItem.suppressed === true, 'MILK IS SUPPRESSED — the withdrawal hold is suppressing it');
   assert(milkItem && /Not available/.test(milkItem.reason || ''), `and the customer sees the reason: "${milkItem?.reason}"`);
+
+  console.log('\n=== 5d. RECORDS — what did I do, and what happened (Layer 2) ===');
+  // The read side of the record, and in-situ reversal: a record can be CORRECTED
+  // and REVERSED where it was made, and its consequences follow it — the shelf
+  // recovers, a withdrawal hold lifts, the schedule event goes back on the list.
+  {
+    const rec0 = await req('GET', `/farm/${farmId}/records`, { token });
+    assert(rec0.status === 200 && Array.isArray(rec0.body?.records), 'GET /records returns the record history');
+    assert(rec0.body.records.length > 0, `${rec0.body?.records?.length} record(s) visible — the farmer can read their own history`);
+    const ats = rec0.body.records.map((r) => new Date(r.at).getTime());
+    assert(ats.every((t, i) => i === 0 || ats[i - 1] >= t), 'records are newest-first');
+
+    // ── quick capture: the shelf is a projection, so the record IS the stock ──
+    // (EGGS are used here: milk is under a withdrawal hold in this suite —
+    //  suppression beats stock, so milk would always read 0.)
+    const capStock = (await req('POST', `/farm/${farmId}/logs`, {
+      token, body: { kind: 'eggs', product: 'eggs', quantity: 10, unit: 'tray', clientId: 'l2-' + Date.now() },
+    }));
+    assert(capStock.status === 200, 'a milk record is captured');
+    const eggA = (capStock.body?.availability || []).find((a) => a.product === 'eggs');
+    const stockA = eggA ? eggA.qty : null;
+    assert(stockA !== null, 'the capture response carries the shelf the record just changed');
+    const listed = await req('GET', `/farm/${farmId}/records`, { token });
+    const topRec = listed.body.records.find((r) => r.kind === 'eggs' && r.quantity === 10);
+    assert(topRec, 'the new record is in the history, newest-first');
+    assert(topRec?.fromSchedule === false, 'a quick capture is marked as not-from-the-schedule');
+
+    // ── CORRECT it in situ: 10 -> 12 trays, the shelf follows +2 ────────────────
+    const fixed = await req('PATCH', `/farm/${farmId}/logs/${topRec.id}`, { token, body: { quantity: 12 } });
+    assert(fixed.status === 200 && fixed.body?.updated?.quantity === 12, 'a record is corrected in place');
+    // The correction response returns the updated record; the shelf is read back
+    // from the shop (the PATCH does not carry availability).
+    const shopB = await req('GET', `/shop/${slug}`, { });
+    const stockB = (shopB.body?.availability || []).find((a) => a.product === 'eggs')?.qty;
+    assert(stockB === stockA + 2, `the shelf follows the correction (${stockA} -> ${stockB})`);
+
+    // a field we do not allow must be ignored, not trusted
+    const sneaky = await req('PATCH', `/farm/${farmId}/logs/${topRec.id}`, {
+      token, body: { quantity: 12, farmId: 'DEADBEEFDEADBEEFDEADBEEF', archivedAt: null },
+    });
+    assert(String(sneaky.body?.updated?.farmId) === String(farmId), 'only declared fields are editable on a record');
+
+    // ── REVERSE it in situ: the record is undone, the shelf gives the eggs back ─
+    const gone = await req('DELETE', `/farm/${farmId}/logs/${topRec.id}`, { token });
+    assert(gone.status === 200 && gone.body?.reversed === true, 'a record is reversed in place');
+    assert(gone.body?.holdsLifted === 0, 'an eggs record opened no hold, so none is lifted');
+    const afterGone = await req('GET', `/farm/${farmId}/records`, { token });
+    assert(!afterGone.body.records.some((r) => r.id === topRec.id), 'the reversed record leaves the history');
+    const avail = await req('GET', `/shop/${slug}`, { });
+    const eggC = (avail.body?.availability || []).find((a) => a.product === 'eggs');
+    assert(eggC && eggC.qty === stockB - 12, `the shelf recovers exactly what the record carried (${eggC?.qty} = ${stockB} - 12)`);
+    const tray = await req('GET', `/farm/${farmId}/reversed`, { token });
+    const inTray = (tray.body?.reversed || []).find((r) => r.kind === 'logs' && String(r._id) === topRec.id);
+    assert(inTray, 'the reversed record is in the tray, ready to be put back');
+
+    // ── RESTORE it: the SAME record returns, and the shelf with it ─────────────
+    const put = await req('POST', `/farm/${farmId}/logs/${topRec.id}/restore`, { token });
+    assert(put.status === 200 && String(put.body?.restored?._id) === String(topRec.id), 'the restored record carries the SAME _id');
+    const avail2 = await req('GET', `/shop/${slug}`, { });
+    const eggD = (avail2.body?.availability || []).find((a) => a.product === 'eggs');
+    assert(eggD && eggD.qty === stockB, `the shelf returns with the record (${eggD?.qty} = ${stockB})`);
+    // Leave it reversed: the cleanest final state for the sections that follow.
+    await req('DELETE', `/farm/${farmId}/logs/${topRec.id}`, { token });
+
+    // ── A TREATMENT record: reversing it lifts the hold it opened ──────────────
+    const t0 = await req('GET', `/farm/${farmId}/today`, { token });
+    const pool = [...(t0.body?.dueToday || []), ...(t0.body?.thisWeek || []), ...(t0.body?.baseline || [])];
+    const withdrawalEvent = pool.find((e) => (e.withdrawal?.milkDays || 0) > 0 || (e.withdrawal?.meatDays || 0) > 0);
+    if (withdrawalEvent) {
+      const done = await req('POST', `/farm/${farmId}/events/${withdrawalEvent._id}/complete`, { token, body: {} });
+      assert(done.status === 200 && done.body?.logId, `the treatment completes and records (${withdrawalEvent.intervention})`);
+      const tLogId = done.body.logId;
+      const recs = await req('GET', `/farm/${farmId}/records`, { token });
+      const tRec = recs.body.records.find((r) => r.id === String(tLogId));
+      assert(tRec, 'the treatment record is in the history');
+      assert(tRec?.fromSchedule === true, 'a schedule completion is marked as from-the-schedule');
+      assert(Array.isArray(tRec?.hold?.affects) && tRec.hold.affects.length > 0,
+        'the record carries the hold it opened — cause and consequence on one line');
+
+      const rev = await req('DELETE', `/farm/${farmId}/logs/${tLogId}`, { token });
+      assert(rev.status === 200, 'the treatment record is reversed');
+      assert((rev.body?.holdsLifted || 0) >= 1, `the hold the record opened is LIFTED (${rev.body?.holdsLifted})`);
+      assert(rev.body?.eventReopened === true, 'the schedule event goes back on the work list');
+      const t1 = await req('GET', `/farm/${farmId}/today`, { token });
+      const pool1 = [...(t1.body?.dueToday || []), ...(t1.body?.thisWeek || []), ...(t1.body?.baseline || [])];
+      assert(pool1.some((e) => String(e._id) === String(withdrawalEvent._id)),
+        'the undone treatment is back as work to do');
+      const recs2 = await req('GET', `/farm/${farmId}/records`, { token });
+      assert(!recs2.body.records.some((r) => r.id === String(tLogId)), 'the reversed treatment leaves the history');
+
+      const back = await req('POST', `/farm/${farmId}/logs/${tLogId}/restore`, { token });
+      assert(back.status === 200, 'the treatment record is restored');
+      assert((back.body?.holdsReArmed || 0) >= 1, `the hold is re-armed with it (${back.body?.holdsReArmed})`);
+      const recs3 = await req('GET', `/farm/${farmId}/records`, { token });
+      assert(recs3.body.records.some((r) => r.id === String(tLogId)), 'the treatment record is back in the history');
+      // Leave it reversed: the event returns to the work list, the hold lifts —
+      // the honest final state is "this has not been done".
+      await req('DELETE', `/farm/${farmId}/logs/${tLogId}`, { token });
+    } else {
+      warn('no withdrawal-bearing event was pending — the hold-lift chain is not covered this run');
+    }
+  }
 
   console.log('\n=== 7. idempotency (offline replay must not double-count) ===');
   const cid = 'replay-' + Date.now();

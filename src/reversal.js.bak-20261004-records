@@ -27,7 +27,7 @@
 //    would orphan them — they would vanish from the screen (they are shown under a plot)
 //    while still existing. That is data loss by interface. It is refused, with the
 //    reason, and the farmer decides what to do about the crops first.
-const { Plot, CropCycle, AnimalGroup, ScheduledEvent, Log, Hold } = require('./models');
+const { Plot, CropCycle, AnimalGroup, ScheduledEvent } = require('./models');
 const schedule = require('./schedule');
 
 /** The three kinds, and what makes each one itself. */
@@ -57,24 +57,6 @@ const KINDS = {
     },
     speciesOf: (doc) => doc.crop,
     labelOf: (doc) => doc.crop,
-  },
-  // ── RECORDS (Layer 2, 2026-10-04) — "entries reversible in situ" ─────────────
-  // A RECORD is the fourth kind, and the one whose consequences reach furthest:
-  // reversing a treatment record must lift the withdrawal hold it opened and put
-  // its schedule event back on the work list. The consequences are implemented in
-  // reverse()/restore() below, because they are specific to this kind.
-  logs: {
-    model: () => Log,
-    noun: 'record',
-    /** Editable: the count, the unit and the note. Never trust anything else. */
-    fields: { quantity: 'number', unit: 'string', note: 'string' },
-    /** A plain label for the reversed tray — what the farmer undid, in their words. */
-    labelOf: (doc) => {
-      const what = doc.product || doc.kind;
-      const howMuch = doc.quantity ? ` — ${doc.quantity}${doc.unit ? ' ' + doc.unit : ''}` : '';
-      return `${what}${howMuch}`;
-    },
-    detailOf: (doc) => doc.subjectLabel || '',
   },
 };
 
@@ -169,61 +151,7 @@ async function reverse(kindName, farmId, id) {
   let cancelled = 0;
   if (kind.subjectType) cancelled = await cancelFuture(farmId, kind.subjectType, doc._id);
 
-  // RULE 4 (Layer 2, records): the CONSEQUENCES of a record follow the record.
-  // Reversing a treatment record is a statement that the treatment did not happen —
-  // so the withdrawal hold it opened must LIFT (the milk is sellable again), the
-  // schedule event it completed must go back on the work list, and the next
-  // occurrence that its completion created must be cancelled (it was a plan grown
-  // from a record that no longer exists). The shelf recovers on its own: the
-  // projection sums logs fresh on every read, and this one is now archived.
-  let eventReopened = false;
-  let holdsLifted = 0;
-  let nextCancelled = 0;
-  if (kindName === 'logs') {
-    if (doc.scheduledEventId) {
-      const ev = await ScheduledEvent.findOne({ _id: doc.scheduledEventId, farmId });
-      if (ev && ev.status === 'done') {
-        ev.status = 'due';
-        ev.doneAt = null;
-        ev.doneBy = null;
-        await ev.save();
-        eventReopened = true;
-      }
-      // Deactivate every hold this completion opened — by the event link or by the
-      // record link (a treatment logged directly has no event, only the log link).
-      const r = await Hold.updateMany(
-        { farmId, active: true, $or: [{ viaEventId: doc.scheduledEventId }, { viaLogId: doc._id }] },
-        { $set: { active: false } },
-      );
-      holdsLifted = r.modifiedCount || 0;
-      // Cancel the future occurrence that completing this event created (same
-      // subject + intervention, scheduled after the record was written). It is a
-      // PLAN, not a record of anything that happened — and it is trivially
-      // re-created by restoring this record and completing the event again, which
-      // is why deleting it here does not violate the archive law.
-      if (ev) {
-        const gone = await ScheduledEvent.deleteMany({
-          farmId,
-          _id: { $ne: ev._id },
-          subjectType: ev.subjectType, subjectId: ev.subjectId,
-          intervention: ev.intervention,
-          status: { $in: ['due', 'carried'] },
-          createdAt: { $gte: doc.at },
-        });
-        nextCancelled = gone.deletedCount || 0;
-      }
-    } else {
-      // A directly-logged treatment (no schedule behind it) can still have opened
-      // a hold — lift by the log link alone.
-      const r = await Hold.updateMany(
-        { farmId, active: true, viaLogId: doc._id },
-        { $set: { active: false } },
-      );
-      holdsLifted = r.modifiedCount || 0;
-    }
-  }
-
-  return { doc, cancelled, eventReopened, holdsLifted, nextCancelled };
+  return { doc, cancelled };
 }
 
 /** Put it back, exactly as it was. */
@@ -246,71 +174,6 @@ async function restore(kindName, farmId, id) {
 
   doc.archivedAt = null;
   await doc.save();
-
-  // RULE 4 (Layer 2, records): putting a record back puts its CONSEQUENCES back.
-  // The SAME log returns (same _id), the event it completed is re-marked done at
-  // the record's own time, the holds it opened are re-armed (their until dates
-  // still stand), and the next occurrence is re-created from the protocol if none
-  // is pending. Restoring re-arms a hold whose window may have partially elapsed —
-  // that is honest: the treatment is recorded as having happened, so the withdrawal
-  // runs from when it actually happened, not from the undo.
-  let eventRedone = false;
-  let holdsReArmed = 0;
-  let nextRescheduled = false;
-  if (kindName === 'logs') {
-    if (doc.scheduledEventId) {
-      const ev = await ScheduledEvent.findOne({ _id: doc.scheduledEventId, farmId });
-      if (ev && ev.status !== 'done') {
-        ev.status = 'done';
-        ev.doneAt = doc.at;
-        ev.productUsed = doc.product || ev.intervention;
-        await ev.save();
-        eventRedone = true;
-      }
-      const r = await Hold.updateMany(
-        { farmId, $or: [{ viaEventId: doc.scheduledEventId }, { viaLogId: doc._id }] },
-        { $set: { active: true } },
-      );
-      holdsReArmed = r.modifiedCount || 0;
-
-      // Re-create the next occurrence if the protocol is interval-shaped and none
-      // is pending. This mirrors what completing the event originally did, without
-      // writing a duplicate record.
-      if (ev) {
-        const pending = await ScheduledEvent.countDocuments({
-          farmId, subjectType: ev.subjectType, subjectId: ev.subjectId,
-          intervention: ev.intervention, status: { $in: ['due', 'carried'] },
-          _id: { $ne: ev._id },
-        });
-        if (pending === 0) {
-          const species = schedule.guessSpecies(ev.subjectLabel) || '';
-          const proto = schedule.findProtocol(species, ev.intervention);
-          if (proto && proto.trigger && proto.trigger.type === 'interval') {
-            const addDays = (d, n) => new Date(d.getTime() + n * 86400000);
-            await ScheduledEvent.create({
-              farmId, subjectType: ev.subjectType, subjectId: ev.subjectId,
-              subjectLabel: ev.subjectLabel, intervention: ev.intervention,
-              dueOn: addDays(new Date(), proto.trigger.days),
-              windowDays: proto.windowDays || 7,
-              doseBasis: proto.doseBasis || '',
-              costEstimate: proto.costEstimate || 0,
-              withdrawal: proto.withdrawal || { milkDays: 0, meatDays: 0 },
-              status: 'due',
-            });
-            nextRescheduled = true;
-          }
-        }
-      }
-    } else {
-      const r = await Hold.updateMany(
-        { farmId, viaLogId: doc._id },
-        { $set: { active: true } },
-      );
-      holdsReArmed = r.modifiedCount || 0;
-    }
-    return { doc, added: 0, eventRedone, holdsReArmed, nextRescheduled };
-  }
-
   const added = await rematerialise(farmId, kind, doc);
   return { doc, added };
 }
@@ -318,24 +181,22 @@ async function restore(kindName, farmId, id) {
 /** What has been undone, so it can be recovered. Newest first. */
 async function reversed(farmId, limit = 30) {
   const q = { farmId, archivedAt: { $ne: null } };
-  const [groups, plots, crops, logs] = await Promise.all([
+  const [groups, plots, crops] = await Promise.all([
     AnimalGroup.find(q).sort({ archivedAt: -1 }).limit(limit).lean(),
     Plot.find(q).sort({ archivedAt: -1 }).limit(limit).lean(),
     CropCycle.find(q).sort({ archivedAt: -1 }).limit(limit).lean(),
-    Log.find(q).sort({ archivedAt: -1 }).limit(limit).lean(),
   ]);
   const shape = (kind, doc) => ({
     kind, _id: doc._id, at: doc.archivedAt,
     label: KINDS[kind].labelOf(doc),
     detail: kind === 'groups' ? `${doc.count} head`
-          : kind === 'logs' ? (KINDS.logs.detailOf(doc) || '')
+          : kind === 'crops' ? `${doc.acres || 0} acres`
           : `${doc.acres || 0} acres`,
   });
   return [
     ...groups.map((d) => shape('groups', d)),
     ...plots.map((d) => shape('plots', d)),
     ...crops.map((d) => shape('crops', d)),
-    ...logs.map((d) => shape('logs', d)),
   ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, limit);
 }
 
@@ -357,10 +218,6 @@ async function reverseAll(farmId, typedName, farmName) {
 
   const now = new Date();
   const counts = {};
-  // Holdings first (their future events are cancelled), then RECORDS — because a
-  // record's reversal re-opens its done event and lifts its holds, which is only
-  // coherent once the holding itself is already out of the way. "Remove all my
-  // data" includes the records: they ARE the farm's data.
   for (const name of ['crops', 'plots', 'groups']) {
     const kind = KINDS[name];
     const Model = kind.model();
@@ -372,24 +229,12 @@ async function reverseAll(farmId, typedName, farmName) {
     }
     counts[name] = docs.length;
   }
-  const logDocs = await Log.find({ farmId, archivedAt: null });
-  for (const d of logDocs) {
-    await reverse('logs', farmId, d._id);
-  }
-  counts.logs = logDocs.length;
   return counts;
 }
 
 /** Put the whole farm back. */
 async function restoreAll(farmId) {
   const counts = {};
-  // Records first — restoring a record re-dones its event and re-arms its holds;
-  // then the holdings come back and the schedules re-materialise around them.
-  const logDocs = await Log.find({ farmId, archivedAt: { $ne: null } });
-  for (const d of logDocs) {
-    await restore('logs', farmId, d._id);
-  }
-  counts.logs = logDocs.length;
   for (const name of ['groups', 'plots', 'crops']) {
     const kind = KINDS[name];
     const Model = kind.model();

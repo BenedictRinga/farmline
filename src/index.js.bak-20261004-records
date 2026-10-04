@@ -271,11 +271,7 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
     ScheduledEvent.find({ farmId, status: { $in: ['due', 'carried'] } })
       .select('subjectType subjectId subjectLabel intervention dueOn baseline withdrawal')
       .lean(),
-    // active: true — a LIFTED hold (its record was reversed) must not keep showing
-    // on the farm screen. Until now this read only the window; the shop read
-    // `active` too, so the two faces could disagree. Layer 2's record reversal
-    // made the difference visible, so it is closed at the source.
-    Hold.find({ farmId, active: true, until: { $gt: now } })
+    Hold.find({ farmId, until: { $gt: now } })
       .select('subjectId subjectLabel affects product until days').lean(),
   ]);
 
@@ -402,10 +398,7 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
 // confirmed by TYPING THE FARM'S OWN NAME, because a tap-through dialog is not a
 // confirmation for something that empties a farm.
 
-// Layer 2 adds 'logs' — the RECORDS themselves are reversible, in situ. A
-// reversed record lifts the hold it opened and re-opens its schedule event; see
-// src/reversal.js RULE 4 for the consequence chain.
-const REVERSAL_KINDS = ['groups', 'plots', 'crops', 'logs'];
+const REVERSAL_KINDS = ['groups', 'plots', 'crops'];
 
 function checkKind(req, res) {
   if (!REVERSAL_KINDS.includes(req.params.kind)) {
@@ -430,22 +423,13 @@ api.patch('/farm/:farmId/:kind/:id', auth.requireAuth('farmer'), auth.requireFar
 api.delete('/farm/:farmId/:kind/:id', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   if (!checkKind(req, res)) return;
   try {
-    const r = await reversal.reverse(req.params.kind, req.params.farmId, req.params.id);
-    const out = {
+    const { cancelled } = await reversal.reverse(req.params.kind, req.params.farmId, req.params.id);
+    return ok(res, {
       reversed: true,
       // Say what actually happened to the schedule — a farmer who is told "3 dates
       // cancelled" understands; one who is told "deleted" does not know what is left.
-      cancelledDates: r.cancelled,
-    };
-    // RECORDS say more (Layer 2): what happened to the hold and to the work list.
-    // The app turns these into honest sentences — "the milk hold is lifted",
-    // "the deworming is back on your list".
-    if (req.params.kind === 'logs') {
-      out.holdsLifted = r.holdsLifted || 0;
-      out.eventReopened = !!r.eventReopened;
-      out.nextCancelled = r.nextCancelled || 0;
-    }
-    return ok(res, out);
+      cancelledDates: cancelled,
+    });
   } catch (e) {
     return bad(res, e.status || 500, e.message);
   }
@@ -455,14 +439,8 @@ api.delete('/farm/:farmId/:kind/:id', auth.requireAuth('farmer'), auth.requireFa
 api.post('/farm/:farmId/:kind/:id/restore', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   if (!checkKind(req, res)) return;
   try {
-    const r = await reversal.restore(req.params.kind, req.params.farmId, req.params.id);
-    const out = { restored: r.doc, datesRestored: r.added };
-    if (req.params.kind === 'logs') {
-      out.holdsReArmed = r.holdsReArmed || 0;
-      out.eventRedone = !!r.eventRedone;
-      out.nextRescheduled = !!r.nextRescheduled;
-    }
-    return ok(res, out);
+    const { doc, added } = await reversal.restore(req.params.kind, req.params.farmId, req.params.id);
+    return ok(res, { restored: doc, datesRestored: added });
   } catch (e) {
     return bad(res, e.status || 500, e.message);
   }
@@ -563,7 +541,6 @@ api.post('/farm/:farmId/logs', auth.requireAuth('farmer'), auth.requireFarmScope
         days: Number(r.withdrawalDays), startedAt: new Date(),
         until: new Date(Date.now() + Number(r.withdrawalDays) * 86400000),
         active: true,
-        viaLogId: doc._id,   // reversal follows the RECORD that opened the hold (Layer 2)
       });
     }
   }
@@ -577,54 +554,6 @@ api.post('/farm/:farmId/logs', auth.requireAuth('farmer'), auth.requireFarmScope
   // The projection result is returned in the SAME response, so the farmer can SEE
   // their log change the shop. That feedback loop is what keeps them logging.
   return ok(res, { accepted, holds, availability });
-}));
-
-// ──────────────────────────────────────────────────────────────────────────────
-// RECORDS — Layer 2: "What did I do, and what happened?"
-// ──────────────────────────────────────────────────────────────────────────────
-// The read side of the record. Until now the logs existed only as WRITE targets
-// (quick capture, event completion) and as projection inputs; the farmer could not
-// SEE their own history anywhere. This answers it: the newest records first, every
-// row shaped in plain language inputs (what, how much, on what, when) — the APP
-// renders the sentences, because the farmer's language lives there.
-//
-// `days` bounds the window (default 14, cap 90): a farmer reads recent history,
-// not an archive. Reversed records are excluded here — they live in /reversed
-// until restored. Every row carries whether it came from the schedule and whether
-// it opened a hold, so the app can say "milk not for sale for 3 days" next to the
-// deworming that caused it — cause and consequence on one line.
-api.get('/farm/:farmId/records', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
-  const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 90);
-  const since = new Date(Date.now() - days * 86400000);
-  const rows = await Log.find({ farmId: req.params.farmId, archivedAt: null, at: { $gte: since } })
-    .sort({ at: -1 })
-    .limit(400)
-    .lean();
-
-  // The holds these records opened, looked up once and matched by either link.
-  // Only still-active holds are attached — a lifted hold is not a fact about today.
-  const holds = await Hold.find({ farmId: req.params.farmId, active: true }).lean();
-  const byLog = new Map(holds.filter((h) => h.viaLogId).map((h) => [String(h.viaLogId), h]));
-  const byEvent = new Map(holds.filter((h) => h.viaEventId).map((h) => [String(h.viaEventId), h]));
-
-  const records = rows.map((r) => {
-    const hold = byLog.get(String(r._id)) || (r.scheduledEventId ? byEvent.get(String(r.scheduledEventId)) : null);
-    return {
-      id: String(r._id),
-      at: r.at,
-      kind: r.kind,
-      product: r.product,
-      quantity: r.quantity,
-      unit: r.unit,
-      subjectLabel: r.subjectLabel,
-      note: r.note,
-      amountKES: r.amountKES || 0,
-      fromSchedule: !!r.scheduledEventId,
-      hold: hold ? { affects: hold.affects, days: hold.days, until: hold.until } : null,
-    };
-  });
-
-  return ok(res, { records, counts: { shown: records.length, days } });
 }));
 
 /** COMPLETE a scheduled event — marks done, records it, opens the hold, sets the next. */

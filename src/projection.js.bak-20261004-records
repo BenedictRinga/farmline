@@ -73,10 +73,7 @@ async function deriveStock(farmId, s, { holds }) {
     const since = new Date(Date.now() - (s.source.windowDays || 1) * DAY);
     const fid = oid(farmId);   // aggregation does NOT cast — must be a real ObjectId
     const rows = await Log.aggregate([
-      // archivedAt: null — a REVERSED record stops counting the moment it is
-      // archived (Layer 2 in-situ reversal). The shelf is a projection of the
-      // records, so an undone record must take its milk off the shelf again.
-      { $match: { farmId: fid, product: s.source.product || s.product, kind: { $in: ['milk', 'eggs'] }, at: { $gte: since }, archivedAt: null } },
+      { $match: { farmId: fid, product: s.source.product || s.product, kind: { $in: ['milk', 'eggs'] }, at: { $gte: since } } },
       { $group: { _id: null, total: { $sum: '$quantity' } } },
     ]);
     const produced = rows[0]?.total || 0;

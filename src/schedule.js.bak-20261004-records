@@ -189,7 +189,6 @@ async function complete({ farm, eventId, byMemberId = null, productUsed = '', sp
       until: addDays(new Date(), d),
       active: true,
       viaEventId: ev._id,
-      viaLogId: log._id,   // reversal follows the RECORD that opened the hold (Layer 2)
     }));
   }
   const hold = holds[0] || null;   // kept for callers that expect one

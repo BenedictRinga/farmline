@@ -251,13 +251,6 @@ logSchema.index(
   { unique: true, partialFilterExpression: { clientId: { $type: 'string', $gt: '' } } },
 );
 
-// REVERSAL (Layer 2, 2026-10-04 — "entries reversible in situ"). A RECORD is
-// archived, never destroyed: the same law as the holdings. The projection sums
-// logs FRESH on every read, so an archived log stops counting the moment
-// archivedAt is set — the shelf recovers without a recompute job. Restoring puts
-// the SAME _id back, which is what makes an undo a real undo.
-logSchema.add({ archivedAt: { type: Date, default: null } });
-
 // ── THE HOLD (withdrawal). --alert on screen is spent on this and nothing else ─
 const holdSchema = new Schema({
   farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
@@ -271,12 +264,6 @@ const holdSchema = new Schema({
   until: { type: Date, required: true, index: true },
   active: { type: Boolean, default: true, index: true },
   viaEventId: { type: Schema.Types.ObjectId, ref: 'ScheduledEvent', default: null },
-  // The RECORD that opened this hold — the second creation path (a treatment
-  // logged directly, not through the schedule) has no event, so reversal needs
-  // the log link too. Both paths stamp one of the two; reversal follows whichever
-  // exists. Without it, undoing a mistaken treatment would leave the milk held
-  // for a treatment that did not happen.
-  viaLogId: { type: Schema.Types.ObjectId, ref: 'Log', default: null, index: true },
 }, { timestamps: true });
 
 // ── SELLABLE (price + terms only — NEVER stock) ───────────────────────────────
