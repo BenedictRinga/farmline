@@ -25,6 +25,11 @@
   (/home/appuser/.ssh/config holds the GitHub key; safe.directory exceptions
   are set for both).
 
+## WHO PUSHES (founder directive 2026-10-05)
+- The AGENT COMMITS ONLY. The founder pushes to GitHub and pulls/deploys on
+  the droplet. An agent never runs `git push` on either farmline repo — the
+  founder wants zero ambiguity about what is on origin and what is live.
+
 ## THE NGINX IS SETTLED (2026-10-05)
 - The two asset-alias blocks are LIVE (QUOTED regexes — nginx eats unquoted
   {16,} braces: pcre2_compile fails). Missing hashed chunks return a REAL 404,
