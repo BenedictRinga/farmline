@@ -300,3 +300,5 @@ Local dev runs on **port 4600** (4200 and 4400 are taken by other projects).
 - ALSO: the regex API block now carries client_max_body_size 12M - it SHADOWED the old prefix block 12M (regex beats prefix; uploads would have been capped at 1M).
 - Verified: real chunk 200 + immutable header, missing-hash 404 (never the shell), shell 200, health 200. Backup: zyppar.com.bak-20261005-assetfix.
 - The insertion script: scripts/farmline-assetfix-20261005.py (backup, insert, nginx -t gate, reload).
+
+- 2026-10-05: build 17 (serverSelectionTimeoutMS 20000 to 8000) REVERTED from main at the founder order (586154f) - the retired thread unmoored state; the change may return ONLY after the founder reviews it in a fresh thread working the PLAN.md rounds.
