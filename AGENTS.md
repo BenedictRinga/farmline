@@ -1,5 +1,57 @@
 # AGENTS.md — farmline server (AI build instructions)
 
+<!-- ═══════════════════════════════════════════════════════════════ -->
+# ⚓ BINDING DEPLOY DOCTRINE — READ FIRST, DEFER TO IT (user directive 2026-10-05)
+
+> The founder's order: every thread working on farmline READS this section
+> before acting, and DESISTS from imposing its own divergent understanding.
+> The architecture below is SETTLED, verified live, and recorded in git.
+
+## THE ARCHITECTURE IS GIT-NATIVE — NO TARBALLS, EVER
+- The droplet deploys by PULLING from GitHub. /opt/farmline-server and
+  /opt/farmline-app are real git checkouts with origin set (SSH).
+- A tarball copy over a checkout DELETES .git and breaks the deploy (the
+  2026-10-05 episode: the new 7-step deploy.sh correctly refused "NO origin
+  remote"). It was recovered once (git init + origin + fetch + reset --hard
+  origin/main, .env preserved). DO NOT REPEAT IT: changes travel as commits →
+  push → the droplet pulls. Never scp-overwrite a checkout.
+
+## THE ONLY DEPLOY COMMANDS
+- Backend:  sudo -u appuser bash -c 'cd /opt/farmline-server && ./deploy.sh'
+- Frontend: sudo -u appuser bash -c 'cd /opt/farmline-app && git pull && yarn && yarn build:prod'
+  then the atomic swap (build into www/, swap /var/www/farmline, keep .prev).
+- NEVER AS ROOT: root's SSH key is not on GitHub (the fetch fails publickey)
+  and root does not own the pm2 daemon. The identity is APPUSER
+  (/home/appuser/.ssh/config holds the GitHub key; safe.directory exceptions
+  are set for both).
+
+## THE NGINX IS SETTLED (2026-10-05)
+- The two asset-alias blocks are LIVE (QUOTED regexes — nginx eats unquoted
+  {16,} braces: pcre2_compile fails). Missing hashed chunks return a REAL 404,
+  never the shell (the ChunkLoadError storm guard). Hashed chunks carry
+  immutable caching.
+- The regex API block carries client_max_body_size 12M (it shadows the old
+  prefix block — do not "restore" the prefix block's limits elsewhere).
+- Backups exist: zyppar.com.bak-20261005-assetfix, .bak-20261005-farmline-fix.
+- Any future nginx edit: backup → insert → nginx -t gate → reload;
+  auto-restore on test failure. The assetfix script is the pattern
+  (scripts/farmline-assetfix-20261005.py in the farmline repo).
+
+## VERIFIED STATE AT THE TIME OF WRITING
+- Backend: checkout @35979cd (build 16), deployed by deploy.sh itself,
+  /api/farmline/health 200. Frontend: /opt/farmline-app pulled to 4c72aab,
+  built, shipped; the served bundle is content-addressed (a src-identical
+  delta keeps the same chunk name — that is CORRECT, not a stale build).
+- /farmline/ 200; /api/farmline/health 200; missing-hash 404.
+
+## HOW TO DISAGREE
+- If you believe a piece of this is wrong: READ the git history of this file
+  and the droplet state first (the verification commands are above). If you
+  still disagree, PROPOSE in your reply with evidence — do not silently
+  re-architecture, re-deploy by tarball, or re-edit nginx around the gates.
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+
 Mirrors the LoopKeeper (`rolodex-server`) conventions deliberately. Read this before changing anything.
 
 > **THE PRODUCT FRAMEWORK LIVES IN THE OTHER REPO.**
