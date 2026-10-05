@@ -240,3 +240,11 @@ Local dev runs on **port 4600** (4200 and 4400 are taken by other projects).
 - nginx (sites-available/zyppar.com, backup .bak-20261005-farmline-fix): the OLD block (the whole /farmline/ path proxied to :4600) is REPLACED by the new architecture — the static bundle at /var/www/farmline/ (atomic swap, .prev rollback) + location ~ ^/api/farmline/ + location /socket-farmline/ proxy to :4600. Both live-verified 200.
 - Frontend: /opt/farmline-app is the clone of farmline-app.git (HEAD 441b46e); yarn build:prod runs on the droplet (appuser nvm node v20.18.3); the bundle ships via the atomic swap. Rolling deploy: cd /opt/farmline-app && git pull && yarn && yarn build:prod, then the swap.
 - GitHub pull auth from the droplet = appuser (sudo -u appuser git ...); both repos are SSH remotes.
+
+## NGINX ASSET BLOCKS - the insertion FIXED (2026-10-05)
+
+- The two asset-alias blocks (hashed-chunk immutable caching + the real-404-on-a-miss guard) are LIVE in sites-available/zyppar.com.
+- The GLM thread failure: nginx QUOTES required around regex locations carrying the {16,} repetition - unquoted, the config parser eats the braces and PCRE gets a truncated pattern (pcre2_compile failed). The repo deploy/nginx-farmline-path.conf carries the quoted fix (1a9e0af).
+- ALSO: the regex API block now carries client_max_body_size 12M - it SHADOWED the old prefix block 12M (regex beats prefix; uploads would have been capped at 1M).
+- Verified: real chunk 200 + immutable header, missing-hash 404 (never the shell), shell 200, health 200. Backup: zyppar.com.bak-20261005-assetfix.
+- The insertion script: scripts/farmline-assetfix-20261005.py (backup, insert, nginx -t gate, reload).
