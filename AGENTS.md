@@ -18,8 +18,10 @@
 
 ## THE ONLY DEPLOY COMMANDS
 - Backend:  sudo -u appuser bash -c 'cd /opt/farmline-server && ./deploy.sh'
-- Frontend: sudo -u appuser bash -c 'cd /opt/farmline-app && git pull && yarn && yarn build:prod'
-  then the atomic swap (build into www/, swap /var/www/farmline, keep .prev).
+- Frontend: sudo -u appuser bash -c 'cd /opt/farmline-app && ./deploy.sh'
+  (each script is the WHOLE deploy: fetch → reset --hard origin/main → build/ship
+  → verify. The app script gained its pull step on 2026-10-05 — before that it
+  rebuilt the stale checkout and shipped an old bundle while reporting success.)
 - NEVER AS ROOT: root's SSH key is not on GitHub (the fetch fails publickey)
   and root does not own the pm2 daemon. The identity is APPUSER
   (/home/appuser/.ssh/config holds the GitHub key; safe.directory exceptions
