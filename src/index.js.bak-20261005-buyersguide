@@ -986,16 +986,10 @@ api.get('/shop/:slug', wrap(async (req, res) => {
   const farm = await Farm.findOne({ slug: req.params.slug }).lean();
   if (!farm) return bad(res, 404, 'no such farm');
   const lang = req.query.lang === 'sw' ? 'sw' : 'en';
-  const [availability, records] = await Promise.all([
-    projection.buildAvailability(farm._id, { lang }),
-    // ROUND A — the buyer's guide: the readable records (numbers only; the app
-    // renders the sentences). Built inside projection.js, the security boundary.
-    projection.buyerRecords(farm._id, { lang }),
-  ]);
+  const availability = await projection.buildAvailability(farm._id, { lang });
   return ok(res, {
     farm: projection.publicFarm(farm),   // ALLOWLIST ONLY
     availability,
-    records,
     moneyMode: money.modeFor(farm),
   });
 }));

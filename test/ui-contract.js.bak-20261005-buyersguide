@@ -127,15 +127,10 @@ function need(label, obj, fields) {
 
   // ── the customer face, exactly as the app reads it ─────────────────────────
   const shop = await call('GET', `/shop/${slug}`);
-  need('GET /shop/:slug (no auth)', shop.body, ['ok', 'farm', 'availability', 'records', 'moneyMode']);
-  need('  .farm', shop.body?.farm, ['name', 'area', 'trust', 'terms', 'slots', 'photo']);
+  need('GET /shop/:slug (no auth)', shop.body, ['ok', 'farm', 'availability', 'moneyMode']);
+  need('  .farm', shop.body?.farm, ['name', 'area', 'trust', 'terms', 'slots']);
   need('  .farm.trust', shop.body?.farm?.trust, ['ordersFulfilled', 'withdrawalAdherence']);
   need('  .availability[0]', shop.body?.availability?.[0], ['product', 'label', 'unit', 'price', 'qty', 'available']);
-  // ROUND A — the buyer's guide: the farm's face rides the payload, and the
-  // readable records carry the numbers the app renders. This farm logged milk
-  // and eggs above, so fresh[0] is guaranteed here — pinning the whole shape.
-  need('  .records', shop.body?.records, ['window', 'fresh']);
-  need('  .records.fresh[0]', shop.body?.records?.fresh?.[0], ['product', 'label', 'unit', 'qty']);
 
   // Order, as the app posts it — AS A SIGNED-IN CUSTOMER. The shop is open to
   // browse but an order needs a verified phone; that is the trust mechanism.

@@ -27,11 +27,6 @@ const oid = (v) => new mongoose.Types.ObjectId(String(v));
  *  deliberate act; forgetting to add a field fails closed. */
 const CUSTOMER_FARM_FIELDS = [
   'name', 'slug', 'area', 'county', 'story', 'photos', 'verifiedFarm', 'terms', 'slots', 'trust',
-  // ROUND A (the buyer's guide): `photo` is THE FARM'S FACE — the one hero
-  // photograph the farmer uploaded (build 16). The trust layer's first movement
-  // is the photograph, and until now the buyer never received it: the allowlist
-  // carried the old Photo Kit array only. One field opens; nothing else does.
-  'photo',
 ];
 
 /** Strip a Farm document down to the customer allowlist. */
@@ -143,56 +138,6 @@ async function buildAvailability(farmId, { lang = 'en' } = {}) {
   return items;
 }
 
-/**
- * buyerRecords — THE READABLE RECORDS, as the BUYER may read them (Round A).
- *
- * The buyer's trust mechanism is that this shelf fell out of records kept on the
- * farm. This shape says so with NUMBERS ONLY, never sentences — the app renders
- * the words in either language (the same law /sharp obeys), so the server's
- * payload stays honest in both.
- *
- * What a buyer may read: what the farm's own logs recorded, inside a small
- * window, for the products ON THE SHELF. What stays structurally unreadable
- * here: costs, the farm's sales money, herd counts, the treatments list,
- * mortality — the buyer reads freshness and care, never the farm's management
- * (framework §1.6: the customer face sees the shelf, not how the farm is run).
- *
- * The matching MIRRORS deriveStock exactly — same product key, same kinds, same
- * archivedAt: null — so this summary can never disagree with the shelf it stands
- * behind (a reversed record leaves both at once).
- */
-async function buyerRecords(farmId, { lang = 'en', windowDays = 7 } = {}) {
-  const since = new Date(Date.now() - windowDays * DAY);
-  const sellables = await Sellable.find({ farmId, enabled: true }).lean();
-  const fed = sellables
-    .filter((s) => ['production', 'harvest'].includes(s.source?.kind))
-    .map((s) => ({ sellable: s, product: s.source?.product || s.product }));
-  if (!fed.length) return { window: windowDays, fresh: [] };
-
-  const rows = await Log.find({
-    farmId: oid(farmId), archivedAt: null,
-    kind: { $in: ['milk', 'eggs', 'harvest'] },
-    product: { $in: fed.map((f) => f.product) },
-    at: { $gte: since },
-  }).select('kind product quantity').lean();
-
-  const fresh = [];
-  for (const { sellable: s, product } of fed) {
-    const kinds = s.source.kind === 'harvest' ? ['harvest'] : ['milk', 'eggs'];
-    const mine = rows.filter((l) => l.product === product && kinds.includes(l.kind));
-    const qty = Math.round(mine.reduce((a, l) => a + (Number(l.quantity) || 0), 0) * 100) / 100;
-    if (qty <= 0) continue;
-    fresh.push({
-      product,
-      label: lang === 'sw' && s.labelSw ? s.labelSw : (s.label || s.product),
-      unit: lang === 'sw' && s.unitSw ? s.unitSw : (s.unit || ''),
-      qty,
-    });
-  }
-  fresh.sort((a, b) => b.qty - a.qty);
-  return { window: windowDays, fresh };
-}
-
 /** Live holds, as the FARMER sees them (richer — this is their own farm). */
 async function activeHolds(farmId) {
   const holds = await Hold.find({ farmId, active: true, until: { $gt: new Date() } }).sort({ until: 1 }).lean();
@@ -208,4 +153,4 @@ async function activeHolds(farmId) {
   }));
 }
 
-module.exports = { publicFarm, buildAvailability, buyerRecords, activeHolds, deriveStock, CUSTOMER_FARM_FIELDS };
+module.exports = { publicFarm, buildAvailability, activeHolds, deriveStock, CUSTOMER_FARM_FIELDS };
