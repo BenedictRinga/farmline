@@ -449,6 +449,60 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(meta.body.counts[s] > 0, `${s}: ${meta.body.counts[s]} protocols`);
   });
 
+
+  console.log('\n=== 18. SHARPEN — what is working, what is not (Layer 3) ===');
+  // The records the farmer already keeps, aggregated into plain shapes. The
+  // server returns NUMBERS AND WINDOWS; the app renders the sentences (vocab law).
+  {
+    const sharp0 = await req('GET', `/farm/${farmId}/sharp?days=7`, { token });
+    assert(sharp0.status === 200 && Array.isArray(sharp0.body?.groups), 'GET /sharp returns the groups');
+    assert(Array.isArray(sharp0.body?.crops), 'crops ride beside the animals — equals, not afterthoughts');
+    assert(sharp0.body?.pulse && typeof sharp0.body.sales === 'object', 'the record pulse and the sales shape ride too');
+
+    // ── per-group production: a milk log CARRIED BY a group counts for that group ──
+    const dairy = sharp0.body.groups.find((g) => (g.species || '') === 'cattle' || /dairy|cow/i.test(g.label || ''));
+    assert(dairy, `a cattle/dairy group exists to sharpen (${sharp0.body.groups.length} groups)`);
+    const milk = await req('POST', `/farm/${farmId}/logs`, {
+      token,
+      body: { kind: 'milk', product: 'milk', quantity: 20, unit: 'litre', clientId: 'sharp-' + Date.now(),
+              subjectType: 'group', subjectId: dairy.id, subjectLabel: dairy.label },
+    });
+    assert(milk.status === 200, 'a milk record carried by the dairy group is captured');
+    const sharp1 = await req('GET', `/farm/${farmId}/sharp?days=7`, { token });
+    const dairy1 = sharp1.body.groups.find((g) => g.id === dairy.id);
+    assert(dairy1?.production && dairy1.production.this >= 20,
+      `the group's production THIS window carries the record (${dairy1?.production?.this})`);
+    assert(dairy1.production.prev !== undefined, 'and the PREVIOUS window rides beside it (the delta the app speaks)');
+
+    // ── care adherence: completing a schedule event counts on its group ──
+    const t = await req('GET', `/farm/${farmId}/today`, { token });
+    const pool = [...(t.body?.dueToday || []), ...(t.body?.thisWeek || [])];
+    const ev = pool.find((e) => String(e.subjectId || '') === dairy.id);
+    if (ev) {
+      const done = await req('POST', `/farm/${farmId}/events/${ev._id}/complete`, { token, body: {} });
+      assert(done.status === 200, `a dairy event completes (${ev.intervention})`);
+      const sharp2 = await req('GET', `/farm/${farmId}/sharp?days=7`, { token });
+      const dairy2 = sharp2.body.groups.find((g) => g.id === dairy.id);
+      assert(dairy2.care.done >= 1, `care.done counts the completion (${dairy2.care.done})`);
+      assert(typeof dairy2.care.late === 'number', 'care.late rides beside it (numbers, never judgement)');
+    } else {
+      warn('no pending dairy event — the care-adherence count is not exercised this run');
+    }
+
+    // ── reversal-aware: the eggs records reversed in 5d do not sharpen anything ──
+    assert(!sharp1.body.groups.some((g) => g.production && g.production.this < 0), 'no negative production leaks from reversed records');
+
+    // ── the buyer's own order, PUBLIC (the cold link works — §1.6) ──
+    const oid = order.body?.order?._id || order.body?.order?.id;
+    assert(oid, 'an order id exists from section 9');
+    const mine = await req('GET', `/shop/${slug}/order/${oid}`, {});
+    assert(mine.status === 200 && Array.isArray(mine.body?.order?.lines) && mine.body.order.lines.length > 0,
+      'GET /shop/:slug/order/:id serves the buyer their order WITHOUT a token (cold link)');
+    assert(mine.body.order.total !== undefined, 'and carries the total (the buyer sees what they agreed to)');
+    const notMine = await req('GET', `/shop/${slug}/order/000000000000000000000000`, {});
+    assert(notMine.status === 404, `a stranger's order id is a 404, never a leak (${notMine.status})`);
+  }
+
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('TEST CRASHED:', e); process.exit(1); });

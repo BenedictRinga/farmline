@@ -627,109 +627,6 @@ api.get('/farm/:farmId/records', auth.requireAuth('farmer'), auth.requireFarmSco
   return ok(res, { records, counts: { shown: records.length, days } });
 }));
 
-// ──────────────────────────────────────────────────────────────────────────────
-// SHARPEN — Layer 3: "What is working, what is not?"  (free layer, §1.5)
-// ──────────────────────────────────────────────────────────────────────────────
-// The records the farmer already keeps, aggregated into PLAIN SHAPES — numbers
-// and windows only, never sentences: the farmer's language lives in the app, and
-// the vocabulary law (no accountancy words) is enforced there. The app renders
-// "Your 6 cows gave 118 litres this week — 14 more than last week" from these
-// fields; the server never says it, so both languages stay honest.
-//
-// Design laws carried in:
-// - ANIMALS AND CROPS AS EQUALS: one response carries both, neither is an
-//   afterthought.
-// - REVERSAL-AWARE: archived records and archived holdings are excluded — an
-//   undone record must not sharpen a picture it is no longer part of.
-// - CARE ADHERENCE, not nagging: how many of this window's completions were done
-//   within the protocol's tolerance window (doneAt <= dueOn + windowDays), and
-//   how many were late. Numbers, never judgement.
-api.get('/farm/:farmId/sharp', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
-  const DAY = 86400000;
-  const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
-  const now = Date.now();
-  const since = new Date(now - days * DAY);
-  const prevSince = new Date(now - 2 * days * DAY);
-
-  const [groups, cycles, plots] = await Promise.all([
-    AnimalGroup.find({ farmId: req.params.farmId, archivedAt: null }).lean(),
-    CropCycle.find({ farmId: req.params.farmId, archivedAt: null }).lean(),
-    Plot.find({ farmId: req.params.farmId, archivedAt: null }).select('name').lean(),
-  ]);
-  const plotName = new Map(plots.map((p) => [String(p._id), p.name]));
-
-  const logs = await Log.find({
-    farmId: req.params.farmId, archivedAt: null,
-    kind: { $in: ['milk', 'eggs', 'harvest', 'mortality'] },
-    at: { $gte: prevSince },
-  }).lean();
-
-  const events = await ScheduledEvent.find({
-    farmId: req.params.farmId, status: 'done', doneAt: { $gte: since },
-  }).select('subjectId intervention dueOn doneAt windowDays').lean();
-
-  const orders = await Order.find({
-    farmId: req.params.farmId, stage: 5, createdAt: { $gte: since },
-  }).select('total createdAt').lean();
-
-  const round2 = (n) => Math.round(n * 100) / 100;
-
-  // ── per animal group ──
-  const groupList = groups.map((g) => {
-    const gid = String(g._id);
-    const mine = logs.filter((l) => String(l.subjectId || '') === gid);
-    // Groups may name their production 'milk' or 'dairy' (both spellings live in
-    // the wild); the LOG kind they feed is 'milk' or 'eggs'. Map liberally.
-    const pk = ({ milk: 'milk', dairy: 'milk', eggs: 'eggs' })[g.productionKind || ''] || '';
-    const prod = mine.filter((l) => pk && l.kind === pk);
-    const sum = (rows) => round2(rows.reduce((s, l) => s + (Number(l.quantity) || 0), 0));
-    const production = prod.length ? {
-      product: prod[0].product || (pk === 'milk' ? 'milk' : 'eggs'),
-      unit: prod[0].unit || (pk === 'milk' ? 'litre' : 'tray'),
-      this: sum(prod.filter((l) => l.at >= since)),
-      prev: sum(prod.filter((l) => l.at < since)),
-    } : null;
-    const losses = mine.filter((l) => l.kind === 'mortality' && l.at >= since)
-      .reduce((s, l) => s + (Number(l.quantity) || 1), 0);
-    const evs = events.filter((e) => String(e.subjectId || '') === gid);
-    const late = evs.filter((e) => new Date(e.doneAt) > new Date(new Date(e.dueOn).getTime() + (e.windowDays || 7) * DAY)).length;
-    return {
-      id: gid, label: g.label, count: g.count || 0, species: g.species || '',
-      production, losses,
-      care: { done: evs.length, late },
-    };
-  });
-
-  // ── per crop ──
-  const cropList = cycles.map((c) => {
-    const mine = logs.filter((l) => String(l.subjectId || '') === String(c._id) && l.kind === 'harvest');
-    return {
-      id: String(c._id), crop: c.crop, plot: plotName.get(String(c.plotId)) || '',
-      status: c.status,
-      daysGrowing: c.plantedOn ? Math.max(0, Math.floor((now - new Date(c.plantedOn).getTime()) / DAY)) : null,
-      harvestThis: round2(mine.filter((l) => l.at >= since).reduce((s, l) => s + (Number(l.quantity) || 0), 0)),
-      unit: (c.yield && c.yield.unit) || (mine[0] && mine[0].unit) || '',
-    };
-  });
-
-  // ── the record pulse + completed sales ──
-  const pulseNow = await Log.countDocuments({ farmId: req.params.farmId, archivedAt: null, at: { $gte: since } });
-  const pulsePrev = await Log.countDocuments({ farmId: req.params.farmId, archivedAt: null, at: { $gte: prevSince, $lt: since } });
-  const sales = {
-    orders: orders.length,
-    kes: round2(orders.reduce((s, o) => s + (Number(o.total) || 0), 0)),
-  };
-
-  return ok(res, {
-    window: { days },
-    groups: groupList,
-    crops: cropList,
-    pulse: { this: pulseNow, prev: pulsePrev },
-    sales,
-  });
-}));
-
-
 /** COMPLETE a scheduled event — marks done, records it, opens the hold, sets the next. */
 api.post('/farm/:farmId/events/:eventId/complete', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const farm = await Farm.findById(req.params.farmId);
@@ -940,28 +837,6 @@ api.post('/farm/:farmId/money/mode', auth.requireAuth('farmer'), auth.requireFar
 // PUBLIC SHOP — open by design. A farm's link must work from a cold browser;
 // that is the entire distribution mechanism.
 // ──────────────────────────────────────────────────────────────────────────────
-
-// ── the buyer's single order, PUBLIC ─────────────────────────────────────────
-// §1.6: the customer face is open by design — a link must work from a cold
-// browser. Until now the order page only worked when checkout handed it the
-// order object in memory; a refresh (or a forwarded link) showed an empty
-// state. This serves the buyer's OWN order fields only, scoped by the farm
-// slug, so the cold link works and nothing else leaks.
-api.get('/shop/:slug/order/:id', wrap(async (req, res) => {
-  const farm = await Farm.findOne({ slug: req.params.slug }).select('_id').lean();
-  if (!farm) return bad(res, 404, 'no such farm');
-  const order = await Order.findOne({ _id: req.params.id, farmId: farm._id }).lean();
-  if (!order) return bad(res, 404, 'no such order');
-  return ok(res, {
-    order: {
-      id: String(order._id), ref: order.ref, stage: order.stage,
-      lines: order.lines, subtotal: order.subtotal, deliveryFee: order.deliveryFee,
-      total: order.total, how: order.how, slot: order.slot, addr: order.addr,
-      createdAt: order.createdAt,
-    },
-  });
-}));
-
 api.get('/shop/:slug', wrap(async (req, res) => {
   const farm = await Farm.findOne({ slug: req.params.slug }).lean();
   if (!farm) return bad(res, 404, 'no such farm');
