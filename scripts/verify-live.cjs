@@ -59,7 +59,11 @@ async function get(url, opts = {}) {
     }
   }
 
-  const health = await get(`${BASE}/health`);
+  // THE NAMESPACED health, not the root one. /health answers only for direct
+  // localhost use (deploy.sh checks it there); on the shared host the root path
+  // belongs to zyppar, so fetching it here compared farmline against zyppar's
+  // shell — a guaranteed FAIL reported under farmline's own label.
+  const health = await get(`${BASE}/api/farmline/health`);
   let hj = null;
   try { hj = JSON.parse(health.body); } catch { /* not json */ }
   if (hj?.ok) {
