@@ -210,6 +210,26 @@ api.post('/farm/:farmId/plots', auth.requireAuth('farmer'), auth.requireFarmScop
   return ok(res, { plot });
 }));
 
+// ── THE FARM'S FACE — one photograph, persisted on the farm document ─────────
+// A photograph makes a stranger's place real (the trust layer). The client
+// downsizes before upload (max 640px JPEG, tens of KB); the cap here is a guard,
+// not the resizing strategy. `/me` returns the farm doc, so the photo rides to
+// the app on every boot — no extra fetch, nothing to go stale.
+api.post('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const { photo } = req.body || {};
+  if (typeof photo !== 'string' || !/^data:image\/(jpeg|png);base64,/.test(photo)) {
+    return bad(res, 400, 'photo must be a base64 JPEG or PNG data URL');
+  }
+  if (photo.length > 300000) return bad(res, 413, 'photo too large — resize before upload');
+  await Farm.updateOne({ _id: req.params.farmId }, { $set: { photo } });
+  return ok(res, { saved: true });
+}));
+
+api.delete('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  await Farm.updateOne({ _id: req.params.farmId }, { $set: { photo: '' } });
+  return ok(res, { saved: true });
+}));
+
 api.post('/farm/:farmId/groups', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const { species, label = '', count = 0, productionKind = '' } = req.body || {};
   if (!protocols.speciesList().includes(String(species))) {
@@ -261,7 +281,7 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
     // The header needs the farm's IDENTITY, not just its name — this is the screen
     // that has to feel like the farmer's own place. Photography is the strongest trust
     // signal we have (framework §1.8), so the photos come with it.
-    Farm.findById(farmId).select('name slug rung area county story photos verifiedFarm').lean(),
+    Farm.findById(farmId).select('name slug rung area county story photos verifiedFarm photo').lean(),
     // archivedAt: null — a reversed holding is hidden, not destroyed (src/reversal.js)
     Plot.find({ farmId, archivedAt: null }).sort({ name: 1 }).lean(),
     CropCycle.find({ farmId, archivedAt: null }).sort({ plantedOn: -1 }).lean(),

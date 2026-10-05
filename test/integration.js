@@ -501,6 +501,21 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(mine.body.order.total !== undefined, 'and carries the total (the buyer sees what they agreed to)');
     const notMine = await req('GET', `/shop/${slug}/order/000000000000000000000000`, {});
     assert(notMine.status === 404, `a stranger's order id is a 404, never a leak (${notMine.status})`);
+
+    // ── the farm's face: one photograph, persisted (founder, 2026-10-05) ──
+    const tinyJpeg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofGh0aHBwcJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPDUzNDP/wgALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==';
+    const ph = await req('POST', `/farm/${farmId}/photo`, { token, body: { photo: tinyJpeg } });
+    assert(ph.status === 200 && ph.body?.saved, 'the farm photograph is accepted');
+    const me2 = await req('GET', '/me', { token });
+    assert(me2.body?.farm?.photo === tinyJpeg, 'and it PERSISTS — /me carries it back on every boot');
+    const badPh = await req('POST', `/farm/${farmId}/photo`, { token, body: { photo: 'http://x/y.jpg' } });
+    assert(badPh.status === 400, 'a URL is not a photograph — the data-URL contract is enforced');
+    const bigPh = await req('POST', `/farm/${farmId}/photo`, { token, body: { photo: 'data:image/jpeg;base64,' + 'A'.repeat(301000) } });
+    assert(bigPh.status === 413, `an oversized upload is refused with 413 (${bigPh.status})`);
+    const rm = await req('DELETE', `/farm/${farmId}/photo`, { token });
+    assert(rm.status === 200, 'the photograph can be removed');
+    const me3 = await req('GET', '/me', { token });
+    assert(me3.body?.farm?.photo === '', 'and removal persists too');
   }
 
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));

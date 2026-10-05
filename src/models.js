@@ -28,6 +28,7 @@ const farmSchema = new Schema({
   county: { type: String, default: '' },
   story: { type: String, default: '' },
   photos: { type: [Schema.Types.Mixed], default: [] },   // from the Photo Kit
+  photo: { type: String, default: '' },                   // THE FARM'S FACE — one hero photograph (client-downsized JPEG data URL)
   verifiedFarm: { type: Boolean, default: false },
 
   // ── the ladder (see ladder.js) ──
