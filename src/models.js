@@ -11,12 +11,7 @@ const config = require('./config');
 
 const conn = mongoose.createConnection(config.mongoUri, {
   dbName: config.dbName,          // enforced: never the zyppar/rolodex db
-  // THE STALE-CONNECTION CURE (2026-10-05): a machine that sleeps (a dev laptop
-  // overnight) leaves the TCP connection dead on wake; before, writes buffered
-  // up to 20s before failing and a capture looked silently lost. 8s fails FAST,
-  // surfaces the honest error in the app, and the next operation reconnects.
-  serverSelectionTimeoutMS: 8000,
-  heartbeatFrequencyMS: 10000,
+  serverSelectionTimeoutMS: 20000,
 });
 conn.on('error', (e) => console.error('[mongo]', e.message));
 
