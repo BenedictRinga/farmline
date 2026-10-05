@@ -35,11 +35,12 @@ in the server .env). Delivery to FIRST FARMERS is the measure of every round.
 
 ## 3. THE LADDERS (the recorded sequence)
 **Server ladder** (commit title: `build N: <one line>`): … 14 Layer 2 records →
-16 the photograph → (17: the stale-connection cure — **PROPOSED, NOT
-SCHEDULED**: it exists only on the retired thread's tree; the founder reviews
-it separately. Do not pull, do not reimplement without approval.)
+16 the photograph → 17 the buyer's-guide read surface → (18: the stale-connection
+cure — **PROPOSED, NOT SCHEDULED**: it exists only on the retired thread's tree;
+the founder reviews it separately. Do not pull, do not reimplement without
+approval.)
 **App ladder**: … 11 SHARPEN → 12 the five wounds → 13 display lines
-(repaired) → **next: the buyer's guide**.
+(repaired) → 14 the buyer's guide → **next: free-phase completion (ROUND A2)**.
 
 ## 4. THE ROUNDS (in order — one at a time, gates before push)
 
@@ -54,6 +55,39 @@ contact path third. Rides the buyer section that already exists.
   surface — nothing new unless the guide demands it).
 - **Gate**: full `yarn build:prod` (AOT) · harnesses green · the founder
   reviews the live page · health 200 · then push/deploy per the doctrine.
+- **STATE 2026-10-05: BUILT AND DEPLOYED (server build 17, app build 14,
+  verifier 12/12). The only open item is the founder's phone review.**
+
+### ROUND A2 — free-phase completion (the founder's law, 2026-10-05)
+> **"At the very least there should be none in the free phase. Why deliver
+> half-baked."** No farmline screen is presented — to the founder's circle,
+> a buyer, or a farmer — while ANY gap below stands. This round closes every
+> inventoried free-phase gap before anything else proceeds.
+- **Language integrity batch** (free customer face):
+  1. The shop fetch carries the app's language (`?lang=`) and REFETCHES on
+     toggle — farm-authored labels (shelf + the readable-records lines) must
+     follow the switch like every other word.
+  2. `checkout.page.ts`: the two hardcoded Swahili payment notes go through
+     the translate pipe (§1.10 — a string built in TS is a bug that survives
+     the language switch).
+  3. The preflight scanner stops flagging HTML-comment prose (the 4 false
+     positives), so the real i18n gate stays loud.
+- **Order cold-reload**: `/order/:id` fetches the buyer's own order from the
+  EXISTING public GET (`/shop/:slug/order/:id`, server build 15) on deep
+  link — no more empty state on refresh; the in-memory handoff stays the
+  fast path.
+- **Leo wording**: `in 0 d` reads as **"Due today"** (`shamba.dueToday`
+  exists; the shape just never uses it).
+- **Per-animal detail screen** (Layer 1 depth): a tracked animal's chip opens
+  its story — identity, status, records, next due. Animals as things they
+  manage, not rows.
+- **Crops-half planning** (Layer 1 depth): planting/season planning on the
+  plot — a crop cycle's story and its next actions, equal to the animals'.
+- **Harness portability**: the Edge path and OS become configuration, so the
+  §1.13 gate can run wherever the founder works.
+- **Gate**: full `yarn build:prod` (AOT) per tranche · harnesses green ·
+  every closed item re-verified on the founder's phone · AGENTS.md §2 ends
+  the round with **"Not built in the free layers: NONE."**
 
 ### ROUND B — Capacitor init (app)
 The farmer's phone: wrap the app for Android so the photo capture is native
@@ -64,6 +98,41 @@ and the install is one link.
 - Server: untouched.
 - **Gate**: the Android build installs on the founder's phone; the photo
   capture works on-device; the web flow unchanged; health 200.
+
+### ROUND B2 — the updates service (server + app; scheduled at the founder's word)
+> The founder, 2026-10-05: users get notifications, and in the beta phase we
+> can FORCE some updates. Today only the passive half exists: the boot guard
+> (`/version` build vs the bundle's own stamped build → reload once) means a
+> fresh open always lands the new code. Nothing reaches a user while the app
+> is OPEN, and nothing can force an update. This round builds the active half.
+- **Server** (small; no new dependency, no nginx change):
+  1. `.env` gains `UPDATES_LATEST_BUILD` + `UPDATES_MANDATORY_BUILD`
+     (founder-edited, ops-consistent with the existing .env discipline);
+     `/api/farmline/version` carries both beside `build`.
+  2. One PUBLIC broadcast room on the EXISTING namespaced chat socket
+     (`updates`); when the mandatory floor moves, the server emits
+     `update:mandatory {build}`. The socket is the accelerator — a client
+     that missed the broadcast learns the truth from `/version` on next boot.
+- **App**:
+  3. The EXISTING boot guard (`guardStaleBundle`) grows the mandatory leg:
+     `mandatoryBuild > myBuild` → the **"Important Update" splash** (the
+     founder's zyppar wording law — Important, never Mandatory) with ONE
+     action, "Update now" → reload once; loop-safe via the healed flag that
+     already exists, keyed by build.
+  4. The socket listener shows the same splash mid-session. Beta "force" is
+     a BLOCKING HONEST SCREEN, never a silent reload loop — the thrown
+     update that looked like nothing happened is the regression this shape
+     exists to prevent.
+  5. The splash is the recovery surface for a stale tab's dead lazy-chunk
+     (an open tab across a deploy): a failed route load routes to the same
+     update surface instead of a dead nav.
+- **The APK leg (designed here, because Round B precedes it)**: an installed
+  APK serves its own bundled copy — a web reload cannot deliver updates to
+  it. B2 decides the mechanism (repackage-and-reinstall flow vs a live
+  download lane) and documents it in AGENTS.md before Round C.
+- **Gate**: the founder's phone shows the splash when the floor is raised ·
+  web force end-to-end · verifier + harnesses green · the APK decision
+  recorded.
 
 ### ROUND C — VERDICT (the first paid rung; server + app)
 The founder decides the shape of the first paid feature in conversation —
@@ -100,6 +169,11 @@ invented now).
    gate.
 7. **Propose, don't impose**: ideas beyond this plan are a reply paragraph
    with evidence, waiting for the founder's word.
+8. **THE FREE-PHASE LAW (founder, 2026-10-05): no presentation with free-phase
+   gaps.** The free layers (FARM, RECORD, SHARPEN) and the free customer face
+   are COMPLETE — every §2 rough edge and free-layer gap scheduled and closed —
+   before anything is presented to a buyer or a farmer. Half-baked is not
+   delivered. ROUND A2 exists because of this law and runs BEFORE Round B.
 
 ## 6. THE REGRESSION LEDGER (what already went wrong — the gates exist because of these)
 - **The single-brace build** (build 13 pushed uncompiled): the AOT gate (rule 3).
@@ -110,3 +184,12 @@ invented now).
 - **The stale incremental build** (a 6.7s build shipped old chunks): when in
   doubt `rm -rf .angular` — a full build is 40-70s; the gates (rule 3's
   photo/margins greps) run on the BUILT output, never on trust.
+- **The stale-checkout ship** (build 13 shipped TWICE while build 14 sat on
+  origin — 2026-10-05): the app deploy.sh had no pull step; it rebuilt the
+  checked-out tree and reported success. Fixed: the script fetches and
+  resets to origin/main before building. Trust no step the script does not
+  perform itself.
+- **The free-phase gaps that survived to deployment** (2026-10-05): the
+  founder read the outstanding list and ruled — no more. Rule 8 + ROUND A2
+  are the structural cure: gaps are scheduled rounds, never a living list
+  the next thread can skip.
