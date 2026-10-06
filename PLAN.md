@@ -52,8 +52,14 @@ dependencies, no silent reload; the mandatory lever is OFF unless
 FARMLINE_MANDATORY_BUILD is set; chat photos activate only from the UI) →
 18b THE NGINX GUARANTEE (the canonical block + the idempotent ensure; the
 sibling thread hardened ^~ conf-wide and installed it root-owned with
-sudoers — the conf now self-heals on every deploy) → (next: the crop
-care-schedule protocols for the 2026-10-06 picker lines).**
+sudoers — the conf now self-heals on every deploy) → **19 THE FULL SHAMBA
+LINE (the founder's "Go", 2026-10-06): the protocol library grown from 9
+species to 36 — all 27 picker crops and 9 animal groups carry real,
+bilingual care schedules (204 templates; annuals stage-only, perennials
+interval-care with stage-anchored first harvests; sheep/rabbits/bees/fish
+were HARD-BLOCKED by the species gate and are now unlocked; guessSpecies
+fixed — sheep-before-goats, cow(?!pea); the live probe materialised an
+avocado cycle at 7 steps and a sheep flock at 8 and reversed clean).**
 **App ladder**: … 11 SHARPEN → 12 the five wounds → 13 display lines
 (repaired) → 14 the buyer's guide → 15/16 the sign-out confirm + the pickers
 opened → 17 the stamp → **18 the updates surfacing + chat photos → next:
