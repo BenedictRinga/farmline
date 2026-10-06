@@ -30,7 +30,14 @@ async function get(url, opts = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 15000);
   try {
-    const r = await fetch(url, { signal: ctrl.signal, redirect: opts.redirect || 'follow' });
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      redirect: opts.redirect || 'follow',
+      // The app-contract probes need POST + a body (the auth-door check).
+      method: opts.method || 'GET',
+      body: opts.body,
+      headers: opts.headers,
+    });
     return { status: r.status, headers: r.headers, body: await r.text() };
   } catch (e) {
     return { status: 0, headers: new Headers(), body: '', error: e.message };
@@ -126,6 +133,36 @@ async function get(url, opts = {}) {
   deep.status === 200
     ? ok('/farmline/s/<slug> → 200 (the farm share link resolves)')
     : bad(`/farmline/s/<slug> → ${deep.status} — THE DISTRIBUTION LINK IS BROKEN`);
+
+  // ── 4b. THE APP CONTRACT (2026-10-06, the bare-path-probe lesson) ──────────
+  // The ladder above probes SERVER-known routes; an app calling a renamed or
+  // removed route would still pass while every farmer 404s. This section probes
+  // THE PATHS THE APP ACTUALLY CALLS — the fixed list, asserted JSON-not-HTML —
+  // so the app↔server contract is verified from BOTH directions at deploy time.
+  // A 401/400 here is a PASS (the route exists and answers properly); a 404 or
+  // an HTML body is the failure today's outage class looks like.
+  console.log('\napp contract (the paths the app calls)');
+  const contract = [
+    { name: 'GET /updates/check (boot, visibility, 5-min poll)', path: '/api/farmline/updates/check?clientBuild=1', statuses: [200], jsonNeeds: ['isUpdateAvailable', 'mandatory', 'type'] },
+    { name: 'GET /meta/ladder (the teaser blocks)', path: '/api/farmline/meta/ladder?lang=en', statuses: [200], jsonNeeds: ['foundation', 'commercial'] },
+    { name: 'GET /farm/:id/inventory (auth shape)', path: '/api/farmline/farm/abc/inventory', statuses: [401], jsonNeeds: null },
+    { name: 'POST /auth/farmer/login (the door answers)', path: '/api/farmline/auth/farmer/login', statuses: [400, 401], jsonNeeds: null, method: 'POST', body: '{}' },
+  ];
+  for (const c of contract) {
+    const r = await get(`${BASE}${c.path}`, {
+      method: c.method || 'GET',
+      body: c.body,
+      headers: c.body ? { 'Content-Type': 'application/json' } : undefined,
+    });
+    const isHtml = /<html/i.test(r.body);
+    const statusOk = c.statuses.includes(r.status);
+    const jsonOk = !c.jsonNeeds || (() => { try { const j = JSON.parse(r.body); return c.jsonNeeds.every((k) => k in j); } catch { return false; } })();
+    if (statusOk && jsonOk && !isHtml) {
+      ok(`${c.name} → ${r.status} JSON (the route exists and is proxied)`);
+    } else {
+      bad(`${c.name} → ${r.status}${isHtml ? ' HTML (the shell answered — the route is GONE or the proxy lost it)' : ''}${statusOk && !jsonOk ? ' (shape changed — the app may break)' : ''}`);
+    }
+  }
 
   // ── 5. the neighbours must be untouched ───────────────────────────────────
   // Only meaningful on the SHARED host. Against a standalone local server there

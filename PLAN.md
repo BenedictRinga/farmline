@@ -45,12 +45,21 @@ rounds. Half-baked is not delivered; withheld-but-shown is the design.
 
 ## 3. THE LADDERS (the recorded sequence)
 **Server ladder** (commit title: `build N: <one line>`): … 14 Layer 2 records →
-16 the photograph → 17 the buyer's-guide read surface → (18: the stale-connection
-cure — **PROPOSED, NOT SCHEDULED**: it exists only on the retired thread's tree;
-the founder reviews it separately. Do not pull, do not reimplement without
-approval.)
+16 the photograph → 17 the buyer's-guide read surface → **18 the updates
+service + photos in chat (deployed 2026-10-06, verified 12/12; the sibling
+thread's review verdict: KEEP — one 66-line module + one public GET, no new
+dependencies, no silent reload; the mandatory lever is OFF unless
+FARMLINE_MANDATORY_BUILD is set; chat photos activate only from the UI) →
+18b THE NGINX GUARANTEE (the canonical block + the idempotent ensure; the
+sibling thread hardened ^~ conf-wide and installed it root-owned with
+sudoers — the conf now self-heals on every deploy) → (next: the crop
+care-schedule protocols for the 2026-10-06 picker lines).**
 **App ladder**: … 11 SHARPEN → 12 the five wounds → 13 display lines
-(repaired) → 14 the buyer's guide → **next: free-phase completion (ROUND A2)**.
+(repaired) → 14 the buyer's guide → 15/16 the sign-out confirm + the pickers
+opened → 17 the stamp → **18 the updates surfacing + chat photos → next:
+free-phase completion (ROUND A2) — the Settings page, the augmented guide
+(About farmline first; the chat, Hatua and updates explained; Start in an
+ion-footer) and the verify ladder's app-contract probes are tranche 5.**
 
 ## 4. THE ROUNDS (in order — one at a time, gates before push)
 
