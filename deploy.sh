@@ -109,10 +109,17 @@ pm2 save
 # us 404'd the whole API while the shell kept serving (the 2026-10-06 outage).
 # The ensure is idempotent: diagnose → remove stale farmline blocks → insert
 # the canonical set → nginx -t (auto-restore on failure) → reload → verify.
-if sudo -n true 2>/dev/null || [ "$(id -u)" = "0" ]; then
-  bash scripts/farmline-nginx-ensure.sh || echo "  ⚠ nginx ensure failed — the deploy continues, but run it manually"
+ENSURE=/opt/farmline-nginx-guarantee/farmline-nginx-ensure.sh
+# 2026-10-06: the ROOT-OWNED package + the sudoers line (appuser NOPASSWD on
+# exactly that path) — a script nobody can invoke is a guarantee on paper only.
+# The repo copy (scripts/farmline-nginx-ensure.sh) stays the SOURCE; refresh the
+# package with: sudo cp scripts/farmline-nginx-ensure.sh /opt/farmline-nginx-guarantee/
+if [ -x "$ENSURE" ]; then
+  sudo -n "$ENSURE" || echo "  ⚠ nginx ensure failed — the deploy continues, but run it manually"
+elif [ "$(id -u)" = "0" ]; then
+  bash scripts/farmline-nginx-ensure.sh || echo "  ⚠ nginx ensure failed — the deploy continues"
 else
-  echo "6.5  nginx ensure skipped (no sudo here) — run: sudo bash scripts/farmline-nginx-ensure.sh"
+  echo "6.5  nginx ensure skipped (no package) — install: sudo cp scripts/farmline-nginx-ensure.sh /opt/farmline-nginx-guarantee/"
 fi
 
 echo "7/7  health…"

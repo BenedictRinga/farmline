@@ -15,6 +15,16 @@ the shop + checkout. Two languages: English default, Swahili carried (i18n).
 The destination: **VERDICT — the first paid rung** (M-Pesa rails are already
 in the server .env). Delivery to FIRST FARMERS is the measure of every round.
 
+**THE PAID-WALL RULING (founder, 2026-10-05):** the plan-ahead — what to
+plant, when, on how much land; breeding decisions; plan-versus-actual —
+belongs to the PAID ladder (the PLAN rung, Layer 5), NOT the free phase.
+The free phase ends at SHARPEN ("what is working"); VERDICT ("can this pay
+me?") and PLAN ("how do I get there?") are the wall. While unactivated, the
+GATE to the paid rungs is VISIBLE on the Steps screen, lists what lies
+beyond (the rungs' own what-you-get lines, bilingual), and is UNOPENABLE —
+availability and teaser are essential; activation arrives with the paid
+rounds. Half-baked is not delivered; withheld-but-shown is the design.
+
 ## 2. THE SETTLED STATE (live and verified — do not re-litigate)
 - **Server build 16** live on the droplet (`/opt/farmline-server`, git-native,
   pm2 `farmline-server` :4600): the photograph persisted (the farm's face),
@@ -63,6 +73,14 @@ contact path third. Rides the buyer section that already exists.
 > half-baked."** No farmline screen is presented — to the founder's circle,
 > a buyer, or a farmer — while ANY gap below stands. This round closes every
 > inventoried free-phase gap before anything else proceeds.
+- **THE PAID WALL + THE TEASER (first tranche — essential now, founder's
+  word)**: the Steps screen becomes the gate. Each commercial rung is
+  visible with its question, price and lock, and EXPANDS to list what lies
+  beyond — the rung's own what-you-get lines, what it asks of you, and the
+  commitment (the server's landing blocks already carry all of it,
+  bilingual, at `/meta/ladder`). Expandable, never openable: no activation
+  exists until the paid rounds. Every tap acknowledged; --fl-alert
+  untouched; EN/SW at parity.
 - **Language integrity batch** (free customer face):
   1. The shop fetch carries the app's language (`?lang=`) and REFETCHES on
      toggle — farm-authored labels (shelf + the readable-records lines) must
@@ -81,10 +99,12 @@ contact path third. Rides the buyer section that already exists.
 - **Per-animal detail screen** (Layer 1 depth): a tracked animal's chip opens
   its story — identity, status, records, next due. Animals as things they
   manage, not rows.
-- **Crops-half planning** (Layer 1 depth): planting/season planning on the
-  plot — a crop cycle's story and its next actions, equal to the animals'.
 - **Harness portability**: the Edge path and OS become configuration, so the
   §1.13 gate can run wherever the founder works.
+- **Moved OUT (the founder's ruling)**: crops-half planning is NOT free-phase
+  work — it is the paid PLAN rung's substance (ROUND D below). The free
+  inventory must still end "Not built in the free layers: NONE" — with the
+  plan-ahead listed behind the wall, not missing.
 - **Gate**: full `yarn build:prod` (AOT) per tranche · harnesses green ·
   every closed item re-verified on the founder's phone · AGENTS.md §2 ends
   the round with **"Not built in the free layers: NONE."**
@@ -142,6 +162,23 @@ too (a payment is correctable/reversible like any record).
 - **Gate**: one real paid rung end-to-end on the founder's phone (STaging
   push first), the records ledger carries it, the verifier + harnesses green.
 
+### ROUND D — PLAN, the plan-ahead (the paid rung behind the wall)
+The founder's ruling (2026-10-05): the completion of the planning half
+belongs HERE, not to the free phase. Built behind the activated wall:
+- **The season decision** — what to plant, when, on how much land: the plan
+  built from the farm's OWN records (what each plot grew, what it yielded,
+  what the work cost in days), stated with confidence bands — never hard
+  verdicts on soft data.
+- **Breeding decisions** — the animals' equivalent: which group to expand,
+  which to hold, what the records say.
+- **Plan-versus-actual** — the season as planned beside the season as it
+  happened; every correction reversible like any record.
+- The teaser lines listed at the gate (the PLAN rung's what-you-get at
+  `/meta/ladder`) are the contract this round must deliver.
+- **Gate**: activated on the founder's phone (on Round C's M-Pesa rails) ·
+  the plan reads from real seeded records · AOT + harnesses + verifier ·
+  founder review on a real screen.
+
 ### AFTER VERDICT — first farmers
 The distribution round: the install link to the first farmers, the founder's
 phone-test loop, the recorded feedback → the next ladder (planned THEN, not
@@ -193,3 +230,18 @@ invented now).
   founder read the outstanding list and ruled — no more. Rule 8 + ROUND A2
   are the structural cure: gaps are scheduled rounds, never a living list
   the next thread can skip.
+
+- **The bare-path probe rollback** (2026-10-06): the emergency rollback to
+  build 16 was decided from INVENTED probe paths (a bare /records that was
+  never a route); build 18 carried every route plus additions, and the
+  rollback itself created the real mismatch (app 18 vs server 16). RULE:
+  before any rollback, verify the route table from the REPO — never from
+  probe guesses. The app-contract probe list rides the verify ladder.
+
+- **The conf owned by no one** (2026-10-06, cured): the shared nginx conf
+  grew farmline blocks by hand-ship; every API/socket prefix in it was a
+  plain location (any future regex could shadow a whole API). Applied:
+  ^~ on EVERY API/socket prefix (zyppar, oauth, openloop, loopkeeper,
+  rolodex, socket.io, farmline), the regex twin removed, and the ensure
+  package installed ROOT-OWNED (/opt/farmline-nginx-guarantee) with the
+  sudoers line — deploy step 6.5 self-heals the conf on every deploy.
