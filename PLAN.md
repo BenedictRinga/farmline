@@ -60,6 +60,12 @@ interval-care with stage-anchored first harvests; sheep/rabbits/bees/fish
 were HARD-BLOCKED by the species gate and are now unlocked; guessSpecies
 fixed — sheep-before-goats, cow(?!pea); the live probe materialised an
 avocado cycle at 7 steps and a sheep flock at 8 and reversed clean).**
+**22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
+render-top of Settings - her whole shamba now carries schedules (27 crops,
+9 animal groups, four of them just unlocked), the season laid out on Today
+with shilling estimates, the trees honest about year three, the milk hold
+still guarding her name, and what comes next (the per-animal page, then the
+Play Store). Bilingual; the investors on standby read it in their language.**
 **App ladder**: … 11 SHARPEN → 12 the five wounds → 13 display lines
 (repaired) → 14 the buyer's guide → 15/16 the sign-out confirm + the pickers
 opened → 17 the stamp → **18 the updates surfacing + chat photos → next:
