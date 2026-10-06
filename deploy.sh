@@ -104,6 +104,17 @@ echo "6/7  restarting via pm2…"
 pm2 restart "$PM2_NAME" --update-env 2>/dev/null || pm2 start src/index.js --name "$PM2_NAME"
 pm2 save
 
+# 6.5  THE NGINX GUARANTEE (2026-10-06): the API/socket blocks used to be a
+# one-time hand-ship owned by NO script — the shared conf changing underneath
+# us 404'd the whole API while the shell kept serving (the 2026-10-06 outage).
+# The ensure is idempotent: diagnose → remove stale farmline blocks → insert
+# the canonical set → nginx -t (auto-restore on failure) → reload → verify.
+if sudo -n true 2>/dev/null || [ "$(id -u)" = "0" ]; then
+  bash scripts/farmline-nginx-ensure.sh || echo "  ⚠ nginx ensure failed — the deploy continues, but run it manually"
+else
+  echo "6.5  nginx ensure skipped (no sudo here) — run: sudo bash scripts/farmline-nginx-ensure.sh"
+fi
+
 echo "7/7  health…"
 sleep 2
 PORT_NOW="$(grep -E '^PORT=' .env | cut -d= -f2 | tr -d '[:space:]' || true)"
