@@ -71,6 +71,12 @@ function need(label, obj, fields) {
   const anyEv = [...(today.body.dueToday || []), ...(today.body.baseline || [])][0];
   need('  an event row', anyEv, ['_id', 'intervention', 'subjectLabel']);
 
+  // A2 tranche 4 — THE UPDATES CHECK (public, no-store): the app reads this on
+  // boot, on every visibility return and every 5 minutes while visible; the
+  // contract pins the exact shape, because a cached or partial answer is a lie.
+  const upd = await call('GET', `/updates/check?clientBuild=1`);
+  need('GET /updates/check (no auth)', upd.body, ['version', 'build', 'isUpdateAvailable', 'mandatory', 'mandatoryBuild', 'type']);
+
   // Complete — the app reads holds[].affects and holds[].days for its message.
   // `holds` is ALWAYS an array; it is only non-empty when the protocol carried a
   // withdrawal window (a vaccine has none, a dewormer has two). Asserting a

@@ -404,13 +404,7 @@ const messageSchema = new Schema({
   fromType: { type: String, enum: ['farmer', 'customer'], required: true },
   fromId: { type: Schema.Types.ObjectId, required: true },
   fromLabel: { type: String, default: '' },
-  // NOT `required` anymore (A2 tranche 4): a photo can travel without a caption.
-  // The emptiness rule lives in chat.postMessage — a message is text OR photo,
-  // never nothing.
-  body: { type: String, trim: true, maxlength: 2000, default: '' },
-  // THE PHOTO IN THE THREAD (A2 tranche 4, cloned from the farm-photo pattern):
-  // a client-downsized JPEG data URL (the client caps itself; the route re-caps).
-  photo: { type: String, default: '' },
+  body: { type: String, required: true, trim: true, maxlength: 2000 },
   at: { type: Date, default: Date.now, index: true },
   // Offline-tolerant: the app may send a message that was composed with no signal.
   // Same idempotency contract as Logs — a replay must not post twice.
@@ -418,10 +412,6 @@ const messageSchema = new Schema({
   // and an empty string is present. This would have crashed the SECOND message in
   // every conversation.
   clientId: { type: String },
-  // THE PHOTO IN THE THREAD (A2 tranche 4, cloned from the farm-photo pattern):
-  // a client-downsized JPEG data URL (the client caps itself; the route re-caps).
-  // Optional — a message is text OR text+photo, never photo alone unattended.
-  photo: { type: String, default: '' },
   readByFarmer: { type: Boolean, default: false },
   readByCustomer: { type: Boolean, default: false },
 }, { timestamps: true });

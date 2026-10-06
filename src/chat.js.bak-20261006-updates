@@ -127,20 +127,9 @@ async function canAccess(conversationId, principal) {
 }
 
 /** Persist a message and roll the conversation's summary forward. */
-async function postMessage({ conversationId, fromType, fromId, fromLabel = '', body, photo = '', clientId = '' }) {
+async function postMessage({ conversationId, fromType, fromId, fromLabel = '', body, clientId = '' }) {
   const text = String(body || '').slice(0, MAX_BODY).trim();
-  // A2 tranche 4 — THE PHOTO: optional, validated, capped. The client downsizes
-  // (the farm-photo pattern); this cap is the guard, not the resizing strategy.
-  // A message is text OR text+photo — never nothing (a photo speaks).
-  let pic = '';
-  if (photo) {
-    if (typeof photo !== 'string' || !/^data:image\/(jpeg|png);base64,/.test(photo)) {
-      return { ok: false, error: 'photo must be a base64 JPEG or PNG data URL' };
-    }
-    if (photo.length > 300000) return { ok: false, error: 'photo too large — resize before sending' };
-    pic = photo;
-  }
-  if (!text && !pic) return { ok: false, error: 'empty message' };
+  if (!text) return { ok: false, error: 'empty message' };
   // Carried over from LoopKeeper: an old client emitting an object as text coerces
   // to this literal, and relaying it would put "[object Object]" in someone's thread.
   if (text === '[object Object]') return { ok: false, error: 'bad message' };
@@ -152,7 +141,7 @@ async function postMessage({ conversationId, fromType, fromId, fromLabel = '', b
 
   const msg = await Message.create({
     conversationId: oid(conversationId),
-    fromType, fromId: oid(fromId), fromLabel, body: text, photo: pic, at: new Date(),
+    fromType, fromId: oid(fromId), fromLabel, body: text, at: new Date(),
     clientId: clientId || undefined,
     readByFarmer: fromType === 'farmer',
     readByCustomer: fromType === 'customer',
@@ -161,7 +150,7 @@ async function postMessage({ conversationId, fromType, fromId, fromLabel = '', b
   await Conversation.updateOne({ _id: oid(conversationId) }, {
     $set: {
       lastMessageAt: msg.at,
-      lastMessageText: pic && !text ? '📷 Photo' : text.slice(0, 140),
+      lastMessageText: text.slice(0, 140),
       ...(fromType === 'farmer' ? { farmerReadAt: msg.at } : { customerReadAt: msg.at }),
     },
   });
@@ -245,7 +234,7 @@ function attach(httpServer) {
       const label = me.type === 'farmer' ? conv.farmLabel : conv.customerLabel;
       const res = await postMessage({
         conversationId: conv._id, fromType: me.type, fromId: me.id, fromLabel: label,
-        body: data?.body, photo: data?.photo || '', clientId: data?.clientId,
+        body: data?.body, clientId: data?.clientId,
       });
       if (!res.ok) return socket.emit('chat:error', { error: res.error });
       const payload = {
@@ -254,7 +243,6 @@ function attach(httpServer) {
         fromType: me.type,
         fromLabel: label,
         body: res.message.body,
-        photo: res.message.photo || '',
         at: res.message.at,
         clientId: res.message.clientId || '',
         duplicate: !!res.duplicate,

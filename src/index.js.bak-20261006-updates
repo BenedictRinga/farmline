@@ -19,7 +19,6 @@ const ladder = require('./ladder');
 const money = require('./money');
 const mpesa = require('./mpesa');
 const chat = require('./chat');
-const updates = require('./updates');
 const schedule = require('./schedule');
 const projection = require('./projection');
 const reversal = require('./reversal');
@@ -75,7 +74,6 @@ const shapeMessage = (m) => ({
   fromType: m.fromType,
   fromLabel: m.fromLabel || '',
   body: m.body,
-  photo: m.photo || '',
   at: m.at,
   // ABSENT, not '' — see the note on logSchema.clientId in models.js.
   clientId: m.clientId || undefined,
@@ -90,10 +88,6 @@ app.get('/api/farmline/version', (_req, res) => {
   res.json({
     version: '0.1.' + b,
     build: b,
-    // A2 tranche 4 — THE UPDATES SERVICE: the founder's beta floor rides beside
-    // the build, so one boot check answers both questions at once.
-    latestBuild: updates.serverBuild(),
-    mandatoryBuild: updates.mandatoryFloor(),
     // The app reads this to say which environment it is running against. Dev and
     // production share the same public path, so this is the only honest signal.
     env: config.envName,
@@ -101,15 +95,6 @@ app.get('/api/farmline/version', (_req, res) => {
     dbName: config.dbName,
     at: new Date().toISOString(),
   });
-});
-
-// THE UPDATES CHECK — CLONED from LoopKeeper's zyppar-style update controller
-// (routes/updates.routes.js + controllers/updates.controller.js): same no-store
-// headers (a cached check answer is a lie), same query shape, farmline's build
-// counter as the truth. PUBLIC — the check must work before any sign-in.
-app.get('/api/farmline/updates/check', (req, res) => {
-  res.set(updates.UPDATE_CHECK_HEADERS);
-  res.json(updates.getUpdateStatus(req.query.clientBuild));
 });
 
 // THE HEALTH ENDPOINT UNDER OUR OWN PREFIX.
@@ -845,8 +830,7 @@ api.post('/conversations/:id/messages', auth.requireAuth('farmer', 'customer'), 
   const label = principal.type === 'farmer' ? conv.farmLabel : conv.customerLabel;
   const out = await chat.postMessage({
     conversationId: conv._id, fromType: principal.type, fromId: principal.id,
-    fromLabel: label, body: req.body?.body, photo: req.body?.photo || '',
-    clientId: req.body?.clientId || undefined,
+    fromLabel: label, body: req.body?.body, clientId: req.body?.clientId || undefined,
   });
   if (!out.ok) return bad(res, 400, out.error);
   return ok(res, { message: shapeMessage(out.message), duplicate: !!out.duplicate });

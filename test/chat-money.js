@@ -68,6 +68,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const m1 = await call('POST', `/conversations/${convId}/messages`, { body: 'Is the milk available tomorrow?', clientId: 'c1' }, tokA);
   m1.body?.ok ? ok('a buyer can send over REST') : bad(`POST message → ${m1.status}`);
 
+  // A2 tranche 4 — THE PHOTO: a buyer sends a picture of the bruised box, and
+  // the farmer's history carries it. The tiny 1x1 data URL proves the pipe.
+  const TINY = 'data:image/jpeg;base64,' +
+    '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwcJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==';
+  const mp = await call('POST', `/conversations/${convId}/messages`, { body: '', photo: TINY, clientId: 'photo1' }, tokA);
+  mp.body?.ok ? ok('a message can carry a photo') : bad(`photo message → ${mp.status} ${JSON.stringify(mp.body).slice(0, 120)}`);
+  const mpBad = await call('POST', `/conversations/${convId}/messages`, { body: '', photo: 'not-a-data-url', clientId: 'photo-bad' }, tokA);
+  mpBad.status === 400 ? ok('a malformed photo is refused, not stored') : bad(`a malformed photo slipped through (${mpBad.status})`);
+
   const dupe = await call('POST', `/conversations/${convId}/messages`, { body: 'Is the milk available tomorrow?', clientId: 'c1' }, tokA);
   dupe.body?.duplicate ? ok('a replayed clientId is recognised as a duplicate (offline-safe)') : bad('a replayed message posted twice');
 
@@ -82,6 +91,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   hist.body?.messages?.some((m) => m.body === 'Is the milk available tomorrow?')
     ? ok('the farmer can read the message')
     : bad('the farmer cannot see the buyer\'s message');
+  hist.body?.messages?.some((m) => m.photo && m.photo.startsWith('data:image/'))
+    ? ok('the photo rides the history back')
+    : bad('the photo did not survive the round trip');
 
   await call('POST', `/conversations/${convId}/read`, {}, farmerTok);
   const afterRead = (await call('GET', '/conversations', null, farmerTok)).body?.conversations?.[0];
