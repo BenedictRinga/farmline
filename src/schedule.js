@@ -225,8 +225,15 @@ async function complete({ farm, eventId, byMemberId = null, productUsed = '', sp
 /** Best-effort species from a label — the real system carries it on the subject. */
 function guessSpecies(label = '') {
   const s = String(label).toLowerCase();
-  if (/cow|ng'?ombe|cattle|heifer|bull/.test(s)) return 'cattle';
-  if (/goat|mbuzi|sheep|kondoo/.test(s)) return 'goats';
+  // COW but NOT COWPEA — 'cowpea' starts with 'cow' (2026-10-06).
+  if (/cow(?!pea)|ng'?ombe|cattle|heifer|bull/.test(s)) return 'cattle';
+  // SHEEP BEFORE GOATS — 'kondoo/sheep' used to fall into the goats regex and
+  // complete sheep work with goat protocols (2026-10-06, the full-line tranche).
+  if (/sheep|kondoo/.test(s)) return 'sheep';
+  if (/goat|mbuzi/.test(s)) return 'goats';
+  if (/rabbit|sungura/.test(s)) return 'rabbits';
+  if (/bee|nyuki|hive/.test(s)) return 'bees';
+  if (/fish|samaki|pond/.test(s)) return 'fish';
   if (/layer|kuku|chicken/.test(s)) return 'layers';
   if (/broiler/.test(s)) return 'broilers';
   if (/pig|nguruwe/.test(s)) return 'pigs';
@@ -234,6 +241,32 @@ function guessSpecies(label = '') {
   if (/bean|maharage/.test(s)) return 'beans';
   if (/napier/.test(s)) return 'napier';
   if (/kale|sukuma/.test(s)) return 'kale';
+  // SWEETPOTATO BEFORE POTATOES — 'sweetpotato' contains 'potato' (and
+  // 'viazi tamu' contains 'viazi'); the specific must be tested first.
+  if (/sweetpotato|viazi tamu/.test(s)) return 'sweetpotato';
+  if (/potato|viazi/.test(s)) return 'potatoes';
+  if (/tomato|nyanya/.test(s)) return 'tomatoes';
+  if (/avocado|pecha/.test(s)) return 'avocado';
+  if (/banana|ndizi/.test(s)) return 'banana';
+  if (/mango|embe|mwembe/.test(s)) return 'mango';
+  if (/coffee|kahawa/.test(s)) return 'coffee';
+  if (/onion|kitunguu/.test(s)) return 'onion';
+  if (/cabbage|kabeji/.test(s)) return 'cabbage';
+  if (/passio/.test(s)) return 'passion';
+  if (/papaya|papai/.test(s)) return 'papaya';
+  if (/pineapple|nanasi/.test(s)) return 'pineapple';
+  if (/sugarcane|miwa/.test(s)) return 'sugarcane';
+  if (/groundnut|karanga/.test(s)) return 'groundnut';
+  if (/cowpea|kunde/.test(s)) return 'cowpea';
+  if (/sorghum|mtama/.test(s)) return 'sorghum';
+  if (/millet|mawele/.test(s)) return 'millet';
+  if (/carrot|karoti/.test(s)) return 'carrot';
+  if (/spinach|mchicha/.test(s)) return 'spinach';
+  if (/sweetpotato|viazi tamu/.test(s)) return 'sweetpotato';
+  if (/cassava|muhogo/.test(s)) return 'cassava';
+  if (/pea|minji/.test(s)) return 'peas';
+  if (/tea|chai/.test(s)) return 'tea';
+  if (/wheat|ngano/.test(s)) return 'wheat';
   return '';
 }
 
