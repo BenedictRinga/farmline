@@ -71,6 +71,13 @@ NGINX GUARANTEE REPAIRED: the 18:03 deploy's nginx -t failure traced to the
 INSTALLED package carrying an old UNQUOTED {16,} regex — the ensure now reads
 the block from the repo checkout (reset to origin/main before 6.5 runs),
 never from a stale installed copy.**
+**24 THE TRACK ENTRY (app + server): POST /farm/:id/animals — the farmer
+adds an individual to a group (name/tag/sex/birth/weight; only the name is
+required), the always-present track button on every group card, the new chip
+opens the story page. The note now FOLDS under a click (the founder's
+ruling). Live-verified: the POST, the chip on the inventory, the fold's
+tap-open-tap-close; the alert's physical tap-through lands with the
+founder's phone review (headless cannot fill Ionic's nested-shadow inputs).**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today

@@ -425,6 +425,22 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
   });
 }));
 
+// ── TRACK AN ANIMAL (the entry the story page needed: the farmer adds an
+// individual to a group — a name, a tag, and whatever she knows today; every
+// other field can stay empty and be filled later on the story page).
+api.post('/farm/:farmId/animals', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const { groupId, name = '', tag = '', sex = '', bornOn = null, weightKg = 0 } = req.body || {};
+  if (!groupId) return bad(res, 400, 'groupId required');
+  const g = await AnimalGroup.findOne({ _id: groupId, farmId: req.params.farmId, archivedAt: null }).lean();
+  if (!g) return bad(res, 404, 'group not found');
+  const a = await Animal.create({
+    farmId: req.params.farmId, groupId: g._id, name: String(name || '').trim(),
+    tag: String(tag || '').trim(), sex: String(sex || '').trim(), species: g.species,
+    bornOn: bornOn ? new Date(bornOn) : null, weightKg: Number(weightKg) || 0,
+  });
+  return ok(res, { animal: a });
+}));
+
 // ── THE ANIMAL'S STORY (the version note's promise, 2026-10-06: "tap any
 // animal and see its whole story on one page"). ONE route, everything the
 // detail page reads. HONESTY SHAPE: the animal's IDENTITY is its own; the CARE
