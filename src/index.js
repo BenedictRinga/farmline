@@ -425,6 +425,59 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
   });
 }));
 
+// ── THE ANIMAL'S STORY (the version note's promise, 2026-10-06: "tap any
+// animal and see its whole story on one page"). ONE route, everything the
+// detail page reads. HONESTY SHAPE: the animal's IDENTITY is its own; the CARE
+// and the RECORDS belong to the GROUP it lives in (materialise is group-level —
+// the app says so rather than inventing per-animal history). The money is what
+// exists: the animal's listed price and the group's open care costs.
+api.get('/farm/:farmId/animal/:animalId', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const a = await Animal.findOne({ _id: req.params.animalId, farmId: req.params.farmId }).lean();
+  if (!a) return bad(res, 404, 'animal not found');
+  const g = a.groupId
+    ? await AnimalGroup.findOne({ _id: a.groupId, farmId: req.params.farmId, archivedAt: null }).lean()
+    : null;
+  const now = new Date();
+  const protos = g ? protocols.forSpecies(g.species) : [];
+  const labelOf = (id) => {
+    const p = protos.find((x) => x.id === id);
+    return p ? { sw: p.name, en: p.en } : { sw: id, en: id };
+  };
+  const events = g
+    ? (await ScheduledEvent.find({
+        farmId: req.params.farmId, subjectType: 'group', subjectId: g._id,
+        status: { $in: ['due', 'carried'] },
+      }).sort({ dueOn: 1 }).limit(60).lean())
+        .map((e) => ({
+          id: String(e._id), intervention: e.intervention, label: labelOf(e.intervention),
+          dueOn: e.dueOn, inDays: Math.round((new Date(e.dueOn) - now) / 86400000),
+          overdue: new Date(e.dueOn) < now, windowDays: e.windowDays || 7,
+          baseline: !!e.baseline, costEstimate: e.costEstimate || 0,
+        }))
+    : [];
+  const holds = g
+    ? await Hold.find({ farmId: req.params.farmId, subjectId: g._id, active: true, until: { $gt: now } })
+        .select('product affects until days').lean()
+    : [];
+  const logs = g
+    ? await Log.find({ farmId: req.params.farmId, subjectId: g._id, archivedAt: null })
+        .sort({ at: -1 }).limit(30).lean()
+    : [];
+  return ok(res, {
+    animal: {
+      _id: String(a._id), name: a.name, tag: a.tag, species: a.species, sex: a.sex,
+      bornOn: a.bornOn, weightKg: a.weightKg, status: a.status,
+      salePrice: a.salePrice || null, photo: a.photo || '',
+      ageMonths: a.bornOn ? Math.floor((now - new Date(a.bornOn)) / (86400000 * 30.44)) : null,
+    },
+    group: g ? { _id: String(g._id), label: g.label || g.species, species: g.species } : null,
+    events,
+    upcomingKes: events.reduce((s, e) => s + (e.costEstimate || 0), 0),
+    holds: holds.map((h) => ({ product: h.product, affects: h.affects, days: h.days, until: h.until })),
+    records: logs.map((r) => ({ id: String(r._id), at: r.at, kind: r.kind, product: r.product, note: r.note })),
+  });
+}));
+
 // ──────────────────────────────────────────────────────────────────────────────
 // REVERSAL — correct it, undo it, put it back. One pattern, all three kinds.
 // ──────────────────────────────────────────────────────────────────────────────

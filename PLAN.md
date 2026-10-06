@@ -60,6 +60,17 @@ interval-care with stage-anchored first harvests; sheep/rabbits/bees/fish
 were HARD-BLOCKED by the species gate and are now unlocked; guessSpecies
 fixed — sheep-before-goats, cow(?!pea); the live probe materialised an
 avocado cycle at 7 steps and a sheep flock at 8 and reversed clean).**
+**23 THE PER-ANIMAL STORY (the note's promise made true): GET
+/farm/:id/animal/:animalId — the animal's identity is its own; the CARE and
+the RECORDS belong to the group (materialise is group-level — the page says
+so, never invented per-animal history); the money is what exists (her listed
+price + the group's open care costs). The app: /farmer/animal/:id — the
+inline panel's 'whole story' tap opens it; Edge 7/7 (Zawadi the probe ewe:
+identity, 38 kg, the flock's 8 events, KES 330 upcoming, no raw keys). THE
+NGINX GUARANTEE REPAIRED: the 18:03 deploy's nginx -t failure traced to the
+INSTALLED package carrying an old UNQUOTED {16,} regex — the ensure now reads
+the block from the repo checkout (reset to origin/main before 6.5 runs),
+never from a stale installed copy.**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today

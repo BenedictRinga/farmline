@@ -19,8 +19,22 @@ set -euo pipefail
 
 NG="${FARMLINE_NGINX_CONF:-/etc/nginx/sites-available/zyppar.com}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BLOCK="$DIR/deploy/farmline-nginx-block.conf"
-[ -f "$BLOCK" ] || { echo "  ✗ canonical block missing: $BLOCK"; exit 1; }
+# THE BLOCK ALWAYS COMES FROM THE REPO CHECKOUT, NEVER FROM AN INSTALLED COPY.
+# The 2026-10-06 deploy failed nginx -t with `unknown directive \.(?:js|css…)`
+# because the INSTALLED package at /opt/deploy/ carried an OLD, UNQUOTED regex
+# — `{16,}` unquoted makes nginx's lexer treat the brace as a block start. The
+# repo copy (quoted) is correct; deploy.sh resets the checkout to origin/main
+# BEFORE this script runs, so the repo copy is always the freshest truth.
+# Resolution order: the repo checkout → this script's own folder → /opt/deploy.
+BLOCK=""
+for CAND in /opt/farmline-server/deploy/farmline-nginx-block.conf \
+            "$(cd "$(dirname "$0")" && pwd)/farmline-nginx-block.conf" \
+            "$DIR/deploy/farmline-nginx-block.conf"; do
+  if [ -f "$CAND" ]; then BLOCK="$CAND"; break; fi
+done
+[ -n "$BLOCK" ] || { echo "  ✗ canonical block missing (no candidate found)"; exit 1; }
+echo "  block: $BLOCK"
+[ -f "$BLOCK" ] || exit 1
 
 echo "── farmline nginx ensure ───────────────────────────────────────"
 
