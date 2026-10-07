@@ -112,6 +112,21 @@ app.get('/api/farmline/updates/check', (req, res) => {
   res.json(updates.getUpdateStatus(req.query.clientBuild));
 });
 
+// ── B2 — THE ANNOUNCE DOOR (the socket is the accelerator) ───────────────────
+// When the founder raises FARMLINE_MANDATORY_BUILD in the .env, OPEN apps learn
+// it on their next 5-minute poll — or IMMEDIATELY through this door: one curl
+// with the announce secret pushes `update:mandatory` to every connected socket.
+// The route is disabled until FARMLINE_ANNOUNCE_SECRET exists in the .env; a
+// secret-less server simply has no door (and no route to attack).
+app.post('/api/farmline/updates/announce', (req, res) => {
+  const secret = process.env.FARMLINE_ANNOUNCE_SECRET;
+  if (!secret) return res.status(404).json({ ok: false, error: 'announce is not armed' });
+  if (req.get('x-announce-secret') !== secret) return res.status(401).json({ ok: false, error: 'not the announcer' });
+  const announced = chat.broadcastUpdate();
+  if (!announced) return res.json({ ok: true, announced: 0, note: 'no mandatory floor set' });
+  return res.json({ ok: true, announced });
+});
+
 // THE HEALTH ENDPOINT UNDER OUR OWN PREFIX.
 // `/health` at the ROOT belongs to whoever serves zyppar.com — not to us. A tenant
 // must never claim a root-level path: it is ambiguous today and a collision

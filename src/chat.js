@@ -27,6 +27,7 @@
 const mongoose = require('mongoose');
 const { Conversation, Message, Farm, Customer } = require('./models');
 const auth = require('./auth');
+const updates = require('./updates'); // B2: the mandatory floor rides the updates room
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const MAX_BODY = 2000;
@@ -194,6 +195,8 @@ async function markRead(conversationId, principal) {
  * already owns `/socket.io`. A shared path would not fail loudly — it would fail by
  * silently delivering one product's events to another.
  */
+let ioRef = null; // B2: the live socket handle for the announce push
+
 function attach(httpServer) {
   let Server;
   try { ({ Server } = require('socket.io')); }
@@ -202,6 +205,7 @@ function attach(httpServer) {
     console.warn('           yarn add socket.io   (then restart)');
     return null;
   }
+  ioRef = null;
 
   const io = new Server(httpServer, {
     // The app is served from the same origin in production (nginx); in dev the
@@ -209,6 +213,7 @@ function attach(httpServer) {
     cors: { origin: '*' },
     path: '/socket-farmline/',
   });
+  ioRef = io; // B2: the announce route broadcasts through this handle
 
   // Authenticate the HANDSHAKE, not each event. An unauthenticated socket gets no
   // room and no events — the same posture as the REST gate.
@@ -224,6 +229,15 @@ function attach(httpServer) {
     const me = socket.data.principal;
 
     socket.emit('chat:ready', { type: me.type, id: me.id });
+
+    // ── THE UPDATES ROOM (B2, the founder: "the socket is the accelerator") ──
+    // Every signed-in socket sits in the public 'updates' room. On CONNECT it
+    // learns the mandatory floor at once (a client that was OPEN through a
+    // deploy hears it on its next reconnect); the announce route pushes to the
+    // whole room the moment the floor moves.
+    socket.join('updates');
+    const floor = updates.mandatoryFloor();
+    if (floor > 0) socket.emit('update:mandatory', { build: floor });
 
     socket.on('chat:join', async (data) => {
       const conv = await canAccess(data?.conversationId, me);
@@ -286,7 +300,16 @@ function attach(httpServer) {
   return io;
 }
 
+// B2 — PUSH THE FLOOR: announce to every connected socket in the updates room.
+// Called by the announce route when the mandatory floor moves. Returns the
+// floor announced (0 = no floor set, nothing pushed).
+function broadcastUpdate() {
+  const f = updates.mandatoryFloor();
+  if (f > 0 && ioRef) ioRef.to('updates').emit('update:mandatory', { build: f });
+  return f;
+}
+
 module.exports = {
   principalFromToken, openConversation, listFor, canAccess,
-  postMessage, history, markRead, attach, labelFor,
+  postMessage, history, markRead, attach, labelFor, broadcastUpdate,
 };
