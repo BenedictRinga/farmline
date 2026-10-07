@@ -215,6 +215,46 @@ api.get('/me', auth.requireAuth('farmer'), wrap(async (req, res) => {
   return ok(res, { farm, member, authArmed: auth.authArmed });
 }));
 
+// ── THE FARM'S PROFILE (the founder, 2026-10-07: "we have no editing of farm
+// profile. I missed setting farm name, and I am since stuck with 'Farmline'
+// as the default name." Settings carries a Profile section of its own; this
+// route is its hand. Only these four fields — the farmer's own words and her
+// own photograph; nothing here can touch the money or the ladder.
+api.patch('/farm/:farmId/profile', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const b = req.body || {};
+  const set = {};
+  if (b.name !== undefined) {
+    const name = String(b.name).trim();
+    if (!name) return bad(res, 400, 'the farm name cannot be empty');
+    if (name.length > 80) return bad(res, 400, 'the farm name is too long');
+    set.name = name;
+  }
+  if (b.area !== undefined) {
+    const area = String(b.area).trim();
+    if (area.length > 80) return bad(res, 400, 'the location is too long');
+    set.area = area;
+  }
+  if (b.story !== undefined) {
+    const story = String(b.story).trim();
+    if (story.length > 2000) return bad(res, 400, 'the story is too long');
+    set.story = story;
+  }
+  if (b.photo !== undefined) {
+    const photo = String(b.photo || '');
+    // THE FARM'S FACE travels as a client-downsized JPEG data URL (the
+    // established farm-page pattern). A string that is not a small image
+    // data URL is a malformed body, not a photo — refuse it plainly.
+    if (photo && (!photo.startsWith('data:image/') || photo.length > 400000)) {
+      return bad(res, 400, 'the photo is too large — pick a smaller one');
+    }
+    set.photo = photo;
+  }
+  if (!Object.keys(set).length) return bad(res, 400, 'nothing to update');
+  const farm = await Farm.findByIdAndUpdate(req.auth.sub, { $set: set }, { new: true }).lean();
+  if (!farm) return bad(res, 404, 'farm not found');
+  return ok(res, { farm });
+}));
+
 // ══════════════════════════════════════════════════════════════════════════════
 // FARMER — setup
 // ──────────────────────────────────────────────────────────────────────────────

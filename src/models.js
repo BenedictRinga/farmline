@@ -40,6 +40,14 @@ const farmSchema = new Schema({
   zuBalance: { type: Number, default: 0 },      // virtual mode only
   mpesa: { paybill: String, till: String, account: String },
 
+  // ── THE AI-VISION TIER (the founder, 2026-10-07: "provide for expansion for
+  // AI to 'see' the farm through the device camera — compute, count, label,
+  // identify, measure — under advanced subscription packages"). The field is
+  // the ENTITLEMENT, not the feature: ops/subscription sets it server-side;
+  // the farmer cannot edit it through the profile route. 'none' today; when
+  // the vision compute lands (a later ladder), 'advanced' unlocks it.
+  visionTier: { type: String, enum: ['none', 'advanced'], default: 'none' },
+
   // ── the finish line (spec v1 §3) — required income is a 12-month PROFILE,
   //    not a flat number: school fees and harvests are lumpy. ──
   requiredIncome: {
