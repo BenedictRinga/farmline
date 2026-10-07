@@ -173,6 +173,27 @@ every state change logged to /var/log/farmline-watch.log and, when
 FARMLINE_ALERT_WEBHOOK is armed in /opt/zyppar-server/.env, POSTed to
 wherever she reads it. THE AGENT COULD NOT SSH (the droplet rejects both
 keys from this machine) — hence the one paste for the founder.**
+**THE TRUSTED SESSION EXECUTED THE DROPLET WORK (Farmline.txt, 2026-10-07
+18:05 EAT — read and ported by this thread): (1) THE WATCH IS INSTALLED
+AND FIXED — /etc/cron.d/farmline-watch, every minute, with TWO bugs of the
+brief’s scripts caught droplet-side and now PORTED BACK to the repo:
+THE DAEMON BUG (the cron runs as root; bare pm2 reaches ROOT’s daemon
+while farmline-server lives in APPUSER’s — the heal now runs
+sudo -u appuser pm2 restart with a pm2 resurrect fallback covering the
+process GONE from the list, which happened TWICE today) and THE 301 BUG
+(http://127.0.0.1 probes 301 to https; curl -sL now follows). (2) THE
+REVIVAL PATTERN IS KNOWN: the deaths land in DEPLOY WINDOWS run with the
+wrong pm2 daemon — so the server deploy.sh’s pm2 actions now ALWAYS run
+as appuser (the DAEMON LAW, pm2_as). (3) THE GENERATOR’S PROPOSAL
+FAILED nginx -t (the stale unquoted ~:440 line survives the surgery span);
+the apply was caught + restored; the lesson is now IN THE GENERATOR: a
+MANDATORY REVIEW BEFORE APPLY section prints every remaining farmline
+line + hunts unquoted-brace regexes. THE LIVE CONFIG IS THE GOOD ONE —
+the 404s were the DEAD PROCESS, not nginx; the consolidation stays
+OPTIONAL (the proposal sits at /tmp/farmline-proposed-20261007-153841.conf
+for when the founder wants it). REMAINING on the droplet: only the
+optional FARMLINE_ALERT_WEBHOOK. The known-good baseline:
+zyppar.com.bak-20261007-knowngood.**
 **ROUTING (the founder, 2026-10-07): the DROPLET work is HANDOFFED to the
 remote-access thread via D:/TODOs/Farmline.txt (this agent has no SSH -
 publickey denied from its machine). The handoff carries: the law, the

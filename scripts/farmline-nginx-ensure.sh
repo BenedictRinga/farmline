@@ -53,6 +53,15 @@ echo
 echo "  ── the diff (live → proposed) ──"
 diff -u "$NG" "$PROP" | head -80 || true
 echo
+
+echo "  ── REVIEW BEFORE APPLY (MANDATORY - the trusted session's lesson) ──"
+echo "  every farmline line REMAINING in the proposal; each must belong to the"
+echo "  ONE canonical set - and there must be NO unquoted {n,} regex anywhere:"
+grep -n "farmline" "$PROP" || echo "    (none)"
+echo "  unquoted-brace regexes left in the proposal (MUST be none):"
+grep -nE 'location[^#]*[{][0-9]+,}' "$PROP" || echo "    (none - clean)"
+echo
+
 cat <<EOF
   ── TO APPLY (the founder's hand, in order) ──
   sudo cp $PROP /etc/nginx/sites-available/zyppar.com
