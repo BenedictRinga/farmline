@@ -90,6 +90,20 @@ check's build EQUALS it, both no-store/no-cache). The Settings version line
 carries the build. Headers FLAT app-wide (the MD ::after gradient dead, one
 hairline border); the two farm captions' computed typography PROVEN
 identical (22px/700/26.4px/-0.44px — the illusion was the surrounding row).**
+**27 THE BRAND KIT IN (the founder’s farmline-brand/farmline-brand, 54 files,
+2026-10-07): the new mark — a field line (the “line” in farmline) with a
+sprout through it, the dominant leaf the hook of an f — replaces the generic
+seedling everywhere: favicon.ico (16/32/48) + favicon.svg, icon-192/512,
+BOTH maskables (192 + 512), apple-touch 180, og-1200x630, Safari mask-icon;
+the manifest recoloured (theme Field #176B3A, background Paper #F3F1EA);
+the in-HTML splash redraws the new mark (the field line draws, the stem
+rises, the f-hook leaf unfolds, the young leaf in #8FBF55); ONE GREEN
+EVERYWHERE — --fl-action and Ionic primary migrate to Field (the buttons
+match the icon and the browser chrome). Edge 21/21 (every asset serves, the
+head carries the README spec, the icon pixels are Field+cream+mist). The
+ionic/ source set (icon 1024 full-bleed, adaptive fg/bg, splashes 2732 +
+dark/light) waits for ROUND B’s capacitor-assets run. Harvest #E2B34A
+respected as OG-rule-only.**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today
