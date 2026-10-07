@@ -56,35 +56,18 @@ if [ "$healthy" = "1" ]; then
   exit 0
 fi
 
-# ── DOWN: heal before telling ──────────────────────────────────────────────────
-echo "$LOG_PREFIX API DOWN (code $code, body: $(head -c 120 /tmp/fl-watch-body 2>/dev/null)) — healing"
-if [ -x "$ENSURE" ]; then
-  bash "$ENSURE" >/tmp/fl-watch-ensure.log 2>&1 || true
-  if grep -qi "FAIL" /tmp/fl-watch-ensure.log; then
-    echo "$LOG_PREFIX ensure reported failure — see /tmp/fl-watch-ensure.log"
-  fi
-fi
-systemctl reload nginx 2>/dev/null || true
-sleep 2
-code2="$(curl -s -o /tmp/fl-watch-body2 -w '%{http_code}' -H "Host: ${HOST_HDR}" --max-time 8 "$BASE_URL" 2>/dev/null)"
-if [ "$code2" = "200" ] && grep -q '"ok":true' /tmp/fl-watch-body2 2>/dev/null; then
-  notify "API was DOWN (code $code) — SELF-HEALED by the nginx ensure + reload. Now up."
-  echo ok > "$STATE_FILE"
-  exit 0
-fi
-
-# Still down: the Node process itself — restart it, then judge once more.
+# ── DOWN: farmline's OWN process first; nginx belongs to the founder ─────────
 if [ -d "$SERVER_DIR" ]; then
   cd "$SERVER_DIR" || true
   pm2 restart farmline-server >/dev/null 2>&1 || true
   sleep 4
-  code3="$(curl -s -o /tmp/fl-watch-body3 -w '%{http_code}' -H "Host: ${HOST_HDR}" --max-time 8 "$BASE_URL" 2>/dev/null)"
-  if [ "$code3" = "200" ] && grep -q '"ok":true' /tmp/fl-watch-body3 2>/dev/null; then
-    notify "API was DOWN (code $code) — the nginx ensure did not serve it; the pm2 restart did. Now up."
+  code2="$(curl -s -o /tmp/fl-watch-body2 -w '%{http_code}' -H "Host: ${HOST_HDR}" --max-time 8 "$BASE_URL" 2>/dev/null)"
+  if [ "$code2" = "200" ] && grep -q '"ok":true' /tmp/fl-watch-body2 2>/dev/null; then
+    notify "API was DOWN (code $code) — the pm2 restart of farmline-server healed it. Now up."
     echo ok > "$STATE_FILE"
     exit 0
   fi
 fi
 
-notify "API IS DOWN (code $code, after ensure $code2, after pm2 restart $code3) — needs a human: run 'cd $SERVER_DIR && sudo bash scripts/farmline-nginx-ensure.sh && sudo nginx -t && sudo systemctl reload nginx' and check 'pm2 logs farmline-server'."
+notify "API IS DOWN (code $code, after pm2 restart $code2) — THE FOUNDER'S NGINX HAND IS NEEDED. On the droplet: cd /opt/farmline-server && sudo git fetch origin && sudo git reset --hard origin/main && sudo bash scripts/farmline-nginx-ensure.sh && sudo nginx -t && sudo systemctl reload nginx. Then check pm2 logs farmline-server."
 echo down > "$STATE_FILE"

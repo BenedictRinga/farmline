@@ -173,6 +173,15 @@ every state change logged to /var/log/farmline-watch.log and, when
 FARMLINE_ALERT_WEBHOOK is armed in /opt/zyppar-server/.env, POSTed to
 wherever she reads it. THE AGENT COULD NOT SSH (the droplet rejects both
 keys from this machine) — hence the one paste for the founder.**
+**THE NGINX LAW (the founder, 2026-10-07 — HARD, supersedes every nginx
+automation): NO SCRIPT WRITES NGINX. Not the watch, not the ensure on a
+cron, not an agent over SSH. nginx serves THREE apps on this droplet —
+one bad line fails them all at once. THE SHAPE FROM NOW ON: agents make
+REQUESTS (the exact lines, the exact file) and the FOUNDER EXECUTES the
+nginx change by hand. The ensure/ship/surgery scripts remain in the repo
+as FOUNDER-EXECUTION-ONLY artifacts — never run by an agent, never by a
+cron, never inside a watch. The farmline-watch CHECKS and TELLS only;
+its only self-service is pm2 restart of farmline's OWN Node process.**
 **THE APK TODO (the founder, 2026-10-07: "Access to the apk, pending or in
 addition to when we get on PlayStore, should be in the Settings"): (a) the
 Settings line is LIVE (Install on Android -> the honest pending alert; when
