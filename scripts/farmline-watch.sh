@@ -19,7 +19,7 @@ set -u
 BASE_URL="${FARMLINE_CHECK_URL:-http://127.0.0.1/api/farmline/health}"
 HOST_HDR="${FARMLINE_CHECK_HOST:-zyppar.com}"
 STATE_FILE="/var/lib/farmline/watch.state"
-ENSURE="/opt/farmline-server/scripts/farmline-nginx-ensure.sh"
+# THE NGINX LAW: no ENSURE variable here — this script never touches nginx.
 SERVER_DIR="/opt/farmline-server"
 ENV_FILE="/opt/zyppar-server/.env"   # FARMLINE_ALERT_WEBHOOK lives beside the other env
 LOG_PREFIX="[farmline-watch $(date '+%F %T')]"
