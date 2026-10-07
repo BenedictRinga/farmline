@@ -164,6 +164,48 @@ async function get(url, opts = {}) {
     }
   }
 
+  // ── THE UPDATE TRUTH (2026-10-07: the check must read the SERVED BUNDLE, not
+  // the server's own counter) ─────────────────────────────────────────────────
+  // /farmline/build.json IS the served bundle's stamp (write-build.cjs at
+  // deploy); the check's build must EQUAL it — if the check still reads the
+  // server's package.json the answer lies forever (the founder's "up to date
+  // forever" illusion). A cached build.json is the other lie: the header must
+  // forbid caching, or a reload never sees the new stamp.
+  console.log('\nthe update truth (the served bundle is the clock)');
+  try {
+    const stamp = await get(`${BASE}/farmline/build.json`);
+    const sj = (() => { try { return JSON.parse(stamp.body); } catch { return null; } })();
+    const cacheHeader = String((stamp.headers && stamp.headers.get ? stamp.headers.get('cache-control') : (stamp.headers || {})['cache-control']) || '');
+    if (stamp.status === 200 && sj && Number(sj.build) > 0) {
+      ok(`/farmline/build.json → build ${sj.build} (@${String(sj.commit || '').slice(0, 7)})`);
+      const chk = await get(`${BASE}/api/farmline/updates/check?clientBuild=1`);
+      const cj = (() => { try { return JSON.parse(chk.body); } catch { return null; } })();
+      if (cj && Number(cj.build) === Number(sj.build)) {
+        ok(`/updates/check answers the SERVED bundle's build (${cj.build}) — the truth`);
+      } else if (cj) {
+        bad(`/updates/check answers build ${cj.build}, the served bundle is ${sj.build} — the check is reading the WRONG clock (the "up to date forever" illusion)`);
+      } else {
+        bad('/updates/check did not answer JSON');
+      }
+      if (/no-store|no-cache|must-revalidate/i.test(cacheHeader)) {
+        ok(`build.json forbids caching (${cacheHeader.slice(0, 40)}...)`);
+      } else {
+        bad(`build.json is CACHEABLE (${cacheHeader || 'no header'}) — a reload may never see the new stamp`);
+      }
+      const chkRes = await get(`${BASE}/api/farmline/updates/check?clientBuild=1`);
+      const chkCache = String((chkRes.headers && chkRes.headers.get ? chkRes.headers.get('cache-control') : '') || '');
+      if (/no-store|no-cache/i.test(chkCache)) {
+        ok('the check answer itself is no-store (a cached answer is a lie)');
+      } else {
+        bad(`the check answer is CACHEABLE (${chkCache || 'no header'}) — the manual check can repeat a stale answer`);
+      }
+    } else {
+      bad(`/farmline/build.json → ${stamp.status}${sj ? '' : ' (not JSON)'} — the update check has no served-bundle clock`);
+    }
+  } catch (e) {
+    bad(`the update-truth probes threw: ${e.message}`);
+  }
+
   // ── 5. the neighbours must be untouched ───────────────────────────────────
   // Only meaningful on the SHARED host. Against a standalone local server there
   // are no neighbours, so the check is skipped rather than reported as a failure

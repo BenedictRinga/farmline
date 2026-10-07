@@ -78,6 +78,18 @@ opens the story page. The note now FOLDS under a click (the founder's
 ruling). Live-verified: the POST, the chip on the inventory, the fold's
 tap-open-tap-close; the alert's physical tap-through lands with the
 founder's phone review (headless cannot fill Ionic's nested-shadow inputs).**
+**25/26 THE UPDATE TRUTH + THE FLAT HEADERS (the founder's 4-item report,
+2026-10-07): the "up to date forever" illusion killed at its root — the
+server's check compared ITS OWN package.json counter (19) against the APP's
+stamp (24): "19 > 24" false forever. serverBuild() now reads the SERVED
+BUNDLE's stamp (/var/www/farmline/build.json; the sibling checkout on the
+dev machine; the env override FARMLINE_SERVED_BUNDLE) — live-probed:
+client 1 → available, client 25 → up to date, client 19 → available. The
+verify ladder gains the update-truth probes (build.json reachable, the
+check's build EQUALS it, both no-store/no-cache). The Settings version line
+carries the build. Headers FLAT app-wide (the MD ::after gradient dead, one
+hairline border); the two farm captions' computed typography PROVEN
+identical (22px/700/26.4px/-0.44px — the illusion was the surrounding row).**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today

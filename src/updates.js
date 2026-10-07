@@ -31,7 +31,29 @@ const UPDATE_CHECK_HEADERS = {
   'Expires': '0',
 };
 
+// THE ONE TRUTH FOR "IS A NEWER APP BUILD SERVED": the STATIC BUNDLE's own
+// stamp — /var/www/farmline/build.json on the droplet (written by the app's
+// write-build.cjs at every deploy). The SERVER's package.json build is a
+// DIFFERENT counter (it counts server releases); comparing it against the
+// app's stamp meant `19 > 24` was false forever — every client was told "up
+// to date" while the served bundle moved on (the founder's 2026-10-07 report:
+// the manual check was "an illusion", stuck at 0.1.3). Resolution order: the
+// env override → the served bundle → the sibling checkout (the dev machine) →
+// the server's own package.json (last resort; never the truth on a droplet).
 function serverBuild() {
+  const candidates = [];
+  if (process.env.FARMLINE_SERVED_BUNDLE) {
+    candidates.push(path.join(process.env.FARMLINE_SERVED_BUNDLE, 'build.json'));
+  }
+  candidates.push('/var/www/farmline/build.json');
+  candidates.push(path.resolve(process.cwd(), '..', 'farmline-app', 'www', 'build.json'));
+  for (const p of candidates) {
+    try {
+      const stamp = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const n = Number(stamp.build);
+      if (Number.isFinite(n) && n > 0) return n;
+    } catch { /* next candidate — a missing file is not an error to log */ }
+  }
   try {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'));
     return Number(pkg.build) || 0;
