@@ -156,6 +156,23 @@ refused, /me persistence, revert) all green; the Settings probe (profile
 renders, the alert pre-filled, the vision chip, the note fold intact).
 THE APK BUILD is the one step needing the founder's Android SDK:
 cd android && ./gradlew assembleDebug (or npx cap open android).**
+**THE 404 INCIDENT + THE WATCH (the founder, 2026-10-07: "Farm is currently
+404. I need to hear this faster, not from users. But first revive it."):
+DIAGNOSED from outside: the static shell serves (200), but /api/farmline/*
+answers NGINX's own 404 — the API proxy block is GONE from the site conf
+while the static regexes survived; the pattern matches a site-conf
+regeneration (a Zyppar deploy) eating the INSERTED farmline block. THE
+REVIVAL (one paste on the droplet): cd /opt/farmline-server && sudo git
+fetch origin && sudo git reset --hard origin/main && sudo bash
+scripts/farmline-nginx-ensure.sh && sudo nginx -t && sudo systemctl reload
+nginx && curl -s -H "Host: zyppar.com" http://127.0.0.1/api/farmline/health
+(expect {"ok":true). THE WATCH (farmline-watch.sh + install-watch.sh,
+committed): every minute — the API through nginx as a phone reaches it; on
+failure the ensure re-inserts the block + reload, then the pm2 restart;
+every state change logged to /var/log/farmline-watch.log and, when
+FARMLINE_ALERT_WEBHOOK is armed in /opt/zyppar-server/.env, POSTed to
+wherever she reads it. THE AGENT COULD NOT SSH (the droplet rejects both
+keys from this machine) — hence the one paste for the founder.**
 **THE APK TODO (the founder, 2026-10-07: "Access to the apk, pending or in
 addition to when we get on PlayStore, should be in the Settings"): (a) the
 Settings line is LIVE (Install on Android -> the honest pending alert; when
