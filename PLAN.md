@@ -104,6 +104,20 @@ head carries the README spec, the icon pixels are Field+cream+mist). The
 ionic/ source set (icon 1024 full-bleed, adaptive fg/bg, splashes 2732 +
 dark/light) waits for ROUND B’s capacitor-assets run. Harvest #E2B34A
 respected as OG-rule-only.**
+**28 CARRY THE WHOLE BRAND (the founder’s ruling, 2026-10-07: “I want
+everything good — add everything we can carry now and use later if current
+utility is unclear”): the kit’s full vocabulary lives as ready tokens
+(--fl-field / field-deep / cream / young-leaf / leaf-mist / harvest /
+brand-ink / paper) so no future surface re-invents a colour; the HARVEST
+RULE — the kit’s OG-only gold — makes its first app appearance crowning the
+What’s-new card (3px news rule; never in the icon); and the DEPLOY-SCRIPT
+FIX the founder’s deploy log exposed: the Angular analytics (y/N) prompt can
+hang a non-interactive deploy — NG_CLI_ANALYTICS=false + CI=true now prefix
+the build in deploy.sh and cli.analytics=false lives in angular.json. The
+“branch behind origin/main” note in the deploy log is the fetch-then-reset
+sequence working as designed: the droplet’s branch pointer lags between
+deploys; every deploy resets to origin/main (the pushed truth) and builds
+it — HEAD is now at <tip> is the proof line.**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today
