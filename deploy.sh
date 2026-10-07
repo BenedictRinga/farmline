@@ -104,23 +104,13 @@ echo "6/7  restarting via pm2…"
 pm2 restart "$PM2_NAME" --update-env 2>/dev/null || pm2 start src/index.js --name "$PM2_NAME"
 pm2 save
 
-# 6.5  THE NGINX GUARANTEE (2026-10-06): the API/socket blocks used to be a
-# one-time hand-ship owned by NO script — the shared conf changing underneath
-# us 404'd the whole API while the shell kept serving (the 2026-10-06 outage).
-# The ensure is idempotent: diagnose → remove stale farmline blocks → insert
-# the canonical set → nginx -t (auto-restore on failure) → reload → verify.
-ENSURE=/opt/farmline-nginx-guarantee/farmline-nginx-ensure.sh
-# 2026-10-06: the ROOT-OWNED package + the sudoers line (appuser NOPASSWD on
-# exactly that path) — a script nobody can invoke is a guarantee on paper only.
-# The repo copy (scripts/farmline-nginx-ensure.sh) stays the SOURCE; refresh the
-# package with: sudo cp scripts/farmline-nginx-ensure.sh /opt/farmline-nginx-guarantee/
-if [ -x "$ENSURE" ]; then
-  sudo -n "$ENSURE" || echo "  ⚠ nginx ensure failed — the deploy continues, but run it manually"
-elif [ "$(id -u)" = "0" ]; then
-  bash scripts/farmline-nginx-ensure.sh || echo "  ⚠ nginx ensure failed — the deploy continues"
-else
-  echo "6.5  nginx ensure skipped (no package) — install: sudo cp scripts/farmline-nginx-ensure.sh /opt/farmline-nginx-guarantee/"
-fi
+# 6.5  THE NGINX REQUEST (THE NGINX LAW, 2026-10-07 — HARD: no script writes
+# nginx; agents/scripts make REQUESTS, the founder executes by hand). The
+# generator diagnoses the live conf, builds the proposed conf into /tmp, and
+# prints the diff + the exact apply commands. It NEVER touches /etc/nginx.
+# The old auto-ensure (backup → surgery → reload) is retired; the /opt/
+# farmline-nginx-guarantee/ package is obsolete.
+bash scripts/farmline-nginx-ensure.sh || echo "  ⚠ the request generator failed — the deploy continues"
 
 echo "7/7  health…"
 sleep 2

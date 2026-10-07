@@ -1,31 +1,30 @@
 #!/usr/bin/env bash
-# farmline-nginx-ensure.sh — THE NGINX GUARANTEE (2026-10-06).
+# farmline-nginx-ensure.sh — THE NGINX REQUEST GENERATOR (2026-10-07).
 #
-# THE OUTAGE THIS ENDS: farmline's API/socket blocks were hand-shipped into
-# the shared zyppar.com conf once (2026-10-05) and owned by NO deploy script.
-# When the shared conf changed underneath us, farmline's API locations
-# vanished and every request died as nginx's own 404 — the app shell loads
-# (static blocks survived) but the app is dead: no data, no auth, no chat.
+# ══ THE NGINX LAW (the founder, 2026-10-07 — HARD) ══════════════════════════
+#   NO SCRIPT WRITES NGINX. This script NO LONGER touches /etc/nginx — not a
+#   byte, not a backup, not a reload. nginx serves THREE apps on this droplet;
+#   one bad line fails them all at once. THE SHAPE: this script BUILDS THE
+#   PROPOSED CONF as a file, shows the diff, and hands the founder the exact
+#   commands. SHE applies it by hand:
+#       sudo cp <proposed> /etc/nginx/sites-available/zyppar.com
+#       sudo nginx -t && sudo systemctl reload nginx
+# ════════════════════════════════════════════════════════════════════════════
 #
-# THE CURE, idempotent — safe to run on EVERY deploy:
-#   1. diagnose: print the farmline lines the conf currently carries
-#   2. remove every existing farmline location block (brace-balanced surgery)
-#   3. insert the canonical set (deploy/farmline-nginx-block.conf)
-#   4. nginx -t — on failure the backup is RESTORED automatically
-#   5. reload + the verify ladder
-#
-# Usage: sudo bash scripts/farmline-nginx-ensure.sh [--diagnose-only]
+# What it does:
+#   1. diagnose: print the farmline lines the live conf currently carries
+#   2. build: run the brace-balanced surgery against a COPY of the live conf,
+#      producing /tmp/farmline-proposed-<ts>.conf — /etc/nginx is never read
+#      for writing and never written
+#   3. show: the diff (live → proposed) and the exact apply commands
+#   4. verify the PROPOSAL with `nginx -t -c` against a sandboxed include? —
+#      NO: nginx -t tests the LIVE conf only; the proposal is validated by
+#      the founder's own `nginx -t` before her reload (the safe gate).
 set -euo pipefail
 
 NG="${FARMLINE_NGINX_CONF:-/etc/nginx/sites-available/zyppar.com}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # THE BLOCK ALWAYS COMES FROM THE REPO CHECKOUT, NEVER FROM AN INSTALLED COPY.
-# The 2026-10-06 deploy failed nginx -t with `unknown directive \.(?:js|css…)`
-# because the INSTALLED package at /opt/deploy/ carried an OLD, UNQUOTED regex
-# — `{16,}` unquoted makes nginx's lexer treat the brace as a block start. The
-# repo copy (quoted) is correct; deploy.sh resets the checkout to origin/main
-# BEFORE this script runs, so the repo copy is always the freshest truth.
-# Resolution order: the repo checkout → this script's own folder → /opt/deploy.
 BLOCK=""
 for CAND in /opt/farmline-server/deploy/farmline-nginx-block.conf \
             "$(cd "$(dirname "$0")" && pwd)/farmline-nginx-block.conf" \
@@ -34,44 +33,34 @@ for CAND in /opt/farmline-server/deploy/farmline-nginx-block.conf \
 done
 [ -n "$BLOCK" ] || { echo "  ✗ canonical block missing (no candidate found)"; exit 1; }
 echo "  block: $BLOCK"
-[ -f "$BLOCK" ] || exit 1
 
-echo "── farmline nginx ensure ───────────────────────────────────────"
+echo "── farmline nginx REQUEST GENERATOR (writes nothing to nginx) ──"
 
-# ── 1. DIAGNOSE (visible in every run's output) ──────────────────────────────
+# ── 1. DIAGNOSE ──────────────────────────────────────────────────────────────
 echo "  farmline lines in the live conf:"
-grep -n "farmline" "$NG" | head -12 || echo "    (none — the blocks are gone)"
+grep -n "farmline" "$NG" | head -20 || echo "    (none — the blocks are gone)"
 echo
 
-[ "${1:-}" = "--diagnose-only" ] && { echo "  (diagnose-only — nothing changed)"; exit 0; }
+# ── 2. BUILD THE PROPOSAL (on a copy; /etc is read-only to this script) ─────
+TS="$(date +%Y%m%d-%H%M%S)"
+PROP="/tmp/farmline-proposed-$TS.conf"
+cp "$NG" "$PROP"
+python3 "$DIR/scripts/farmline-nginx-surgery.py" "$PROP" "$BLOCK"
+echo "  ✓ proposal built: $PROP"
 
-# ── 2-3. THE SURGERY (backup → remove stale → insert canonical) ─────────────
-BAK="$NG.bak-$(date +%Y%m%d-%H%M%S)-fl-ensure"
-cp "$NG" "$BAK"
-echo "  backup: $BAK"
+# ── 3. SHOW THE DIFF + THE APPLY COMMANDS ────────────────────────────────────
+echo
+echo "  ── the diff (live → proposed) ──"
+diff -u "$NG" "$PROP" | head -80 || true
+echo
+cat <<EOF
+  ── TO APPLY (the founder's hand, in order) ──
+  sudo cp $PROP /etc/nginx/sites-available/zyppar.com
+  sudo nginx -t
+  sudo systemctl reload nginx
+  curl -s https://zyppar.com/api/farmline/version   # expect JSON, build 22
 
-restore() {
-  echo "  ✗ FAILED — restoring the backup"
-  cp "$BAK" "$NG"
-  nginx -t && systemctl reload nginx && echo "  ✓ backup restored, nginx reloaded (the outage state is unchanged, nothing worse)"
-}
-trap restore ERR
-
-python3 "$DIR/scripts/farmline-nginx-surgery.py" "$NG" "$BLOCK"
-
-echo "4a  nginx -t…"
-nginx -t
-echo "4b  reloading…"
-systemctl reload nginx
-trap - ERR
-
-# ── 5. THE VERIFY LADDER ─────────────────────────────────────────────────────
-sleep 1
-echo "  verify:"
-curl -s -o /dev/null -w "    /farmline/                     %{http_code}\n" https://zyppar.com/farmline/
-curl -s -o /dev/null -w "    /api/farmline/version          %{http_code}\n" https://zyppar.com/api/farmline/version
-curl -s -o /dev/null -w "    /api/farmline/updates/check    %{http_code}\n" "https://zyppar.com/api/farmline/updates/check?clientBuild=1"
-curl -s -o /dev/null -w "    /farmline/s/test-farm (deep)   %{http_code}\n" https://zyppar.com/farmline/s/test-farm
-curl -s -o /dev/null -w "    /api/loopkeeper/health (nb)    %{http_code}\n" https://zyppar.com/api/loopkeeper/health
-echo "    version says: $(curl -s https://zyppar.com/api/farmline/version | head -c 120)"
-echo "── done ────────────────────────────────────────────────────────"
+  If nginx -t fails: the proposal has a line the lexer rejects — paste the
+  error back to the agent (the stale unquoted line at ~:440 is the known one).
+  NOTHING HAS BEEN CHANGED — /etc/nginx is exactly as it was.
+EOF
