@@ -309,3 +309,26 @@ Local dev runs on **port 4600** (4200 and 4400 are taken by other projects).
 - The insertion script: scripts/farmline-assetfix-20261005.py (backup, insert, nginx -t gate, reload).
 
 - 2026-10-05: build 17 (serverSelectionTimeoutMS 20000 to 8000) REVERTED from main at the founder order (586154f) - the retired thread unmoored state; the change may return ONLY after the founder reviews it in a fresh thread working the PLAN.md rounds.
+
+## ⛔ NGINX GOVERNANCE — THE PASS-THROUGH RULE (founder directive 2026-10-07)
+
+> **ALL nginx changes are REQUESTED, never applied.** The founder passes them
+> through the trusted session personally. NO agent, NO thread, NO deploy script
+> may edit `/etc/nginx/` directly — not even "the repo's own config verbatim".
+
+1. **The trigger**: the 2026-10-07 07:11 unannounced nginx insertion (99 lines)
+   by a parallel thread, discovered only during the farmline 404 emergency.
+   The config content happened to be benign — the PROCESS it depended on was
+   dead, and nothing had announced the change. Unannounced nginx edits are
+   damage regardless of their content.
+2. **The rule**: any agent/thread that believes nginx needs a change writes the
+   exact diff (location blocks, verbatim) into its report and STOPS. The
+   founder applies it through the trusted session.
+3. **The baseline**: the known-good snapshot is
+   `/etc/nginx/sites-available/zyppar.com.bak-20261007-knowngood` (verified:
+   zyppar 200, farmline app 200, farmline API 200, LoopKeeper 200, nginx -t clean).
+   Any future config whose `nginx -t` fails or whose surfaces drop below that
+   state is restored from the snapshot first, discussed second.
+4. **Deploys that "legitimately" carry nginx config** (deploy.sh, the guarantee
+   package) still fall under this rule: they announce the diff in their output
+   and the founder pre-approves the script — no silent inserts.
