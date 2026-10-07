@@ -126,6 +126,14 @@ element in the top 130px) proved the hairline was the ONLY boundary paint;
 it is now 0 — no gradient, no shadow, no line; separation comes from the
 content’s own top margin. The only paint left in the band is the help
 button’s own pill outline (a button, not the header).**
+**30 THE HAIRLINE IS BACK (the founder’s third flat-header ruling, 2026-10-07:
+zero-paint read as odd — “If ion-footer can have the top border hairline so
+can ion-header have same as bottom”): the header toolbar draws its bottom
+hairline in --fl-border-tertiary, and --ion-border-color (the ink of
+Ionic’s own footer hairlines) now maps to the SAME token — header and
+footer lines are the same line, one product. The shadow’s death stays the
+app-wide floor (the MD ::after gradient remains dead). Band probe: toolbar
+bb 1px @tertiary ink, shadow none, gradient dead.**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today
