@@ -118,6 +118,14 @@ the build in deploy.sh and cli.analytics=false lives in angular.json. The
 sequence working as designed: the droplet’s branch pointer lags between
 deploys; every deploy resets to origin/main (the pushed truth) and builds
 it — HEAD is now at <tip> is the proof line.**
+**29 ZERO PAINT AT THE BOUNDARY (the founder’s second flat-header ruling,
+2026-10-07): the build-26 hairline still read as a shadow strip on her
+phone — at fractional DPRs (2.75-4) a 1px logical border renders as a
+blurry 3-4 physical-pixel band of 12% ink. The deep band probe (every
+element in the top 130px) proved the hairline was the ONLY boundary paint;
+it is now 0 — no gradient, no shadow, no line; separation comes from the
+content’s own top margin. The only paint left in the band is the help
+button’s own pill outline (a button, not the header).**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today
