@@ -301,6 +301,34 @@ and the install is one link.
   capture works on-device; the web flow unchanged; health 200.
 
 ### ROUND B2 — the updates service (server + app; scheduled at the founder's word)
+**34 THE APK IS BUILT (2026-10-07; this machine has JDK 17 + the Android SDK):
+cap sync + gradle assembleDebug - BUILD SUCCESSFUL (one dl.google.com read-
+timeout on the first run; the retry completed in 1m24s). The 8.5 MB
+app-debug.apk ships at www/downloads/farmline.apk (ship-apk.cjs, chained
+into build:prod guarded); the app deploy PRESERVES www/downloads across
+the www swap so the download URL never dies; Settings > Install on Android
+probes the hosted APK and gains the Download action only when it is really
+there. The signed release (keytool -> assembleRelease) is the next rung
+when the Play Store application begins; the debug APK serves farmers NOW.**
+**34 AI VISION - THE COMPUTE IS LIVE (the founder’s expansion directive):
+server build 23: POST /farm/:farmId/vision gates on visionTier===advanced
+(server-side only), judges the farmer-fixable body before the key she
+cannot fix, rides OpenRouter’s vision model (z-ai/glm-4.5v default,
+FARMLINE_VISION_MODEL overridable) with the extension-officer prompt
+(count, identify, label, estimate; <=120 words) - plain fetch, NO new
+dependency; not armed = honest 503, service miss = honest 502.
+scripts/set-vision.cjs is the founder’s droplet hand for the tier.
+app build 34: the Advanced farm’s vision tap opens the COMPUTE FLOW (the
+camera/gallery on the Android shell, the file picker on the web), the
+insight as an alert; the not-advanced farm keeps the explanation alert.
+Probes: the 403 gate / the 503 not-armed / the 400 junk photo all PASS.
+TO ARM ON THE DROPLET: OPENROUTER_API_KEY=<key> in the .env (restart),
+then set-vision <farmId> advanced for the pilot farms.**
+**B2’S TAIL - DECLARED COMPLETE: the check, the ack, the apply, the manual
+check, the mandatory floor, the socket accelerator, the announce door all
+live and verified. The one honest gap: notifications to a FULLY OFFLINE
+device need web-push (VAPID) - a fourth dependency against the cap of
+three; recorded as a founder decision, not silently built.**
 > The founder, 2026-10-05: users get notifications, and in the beta phase we
 > can FORCE some updates. Today only the passive half exists: the boot guard
 > (`/version` build vs the bundle's own stamped build → reload once) means a
