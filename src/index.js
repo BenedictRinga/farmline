@@ -212,7 +212,9 @@ api.get('/me', auth.requireAuth('farmer'), wrap(async (req, res) => {
   }
   const farm = await Farm.findById(req.auth.sub).lean();
   if (!farm) return bad(res, 404, 'farm not found');
-  return ok(res, { farm, member, authArmed: auth.authArmed });
+  // The contract is explicit even for farms minted before a field existed
+  // (mongo does not backfill): the vision tier is 'none' unless set.
+  return ok(res, { farm: { ...farm, visionTier: farm.visionTier || 'none' }, member, authArmed: auth.authArmed });
 }));
 
 // ── THE FARM'S PROFILE (the founder, 2026-10-07: "we have no editing of farm

@@ -134,6 +134,28 @@ Ionic’s own footer hairlines) now maps to the SAME token — header and
 footer lines are the same line, one product. The shadow’s death stays the
 app-wide floor (the MD ::after gradient remains dead). Band probe: toolbar
 bb 1px @tertiary ink, shadow none, gradient dead.**
+**31/32 ROUND B + THE PROFILE + THE TRUTHFUL VERSION (the founder's three
+directives, 2026-10-07): (1) THE FARM'S PROFILE - Settings carries a Profile
+section of its own (avatar, name, location); Edit opens the alert (name
+required, area, story); the photo rides the proven downscale -> PATCH hand;
+PATCH /farm/:id/profile validates and refuses junk/empty-name plainly
+(server build 21); the founder is never stuck with 'Farmline' again.
+(2) THE TRUTHFUL VERSION - the version composes 0.1.<build> everywhere
+(the updates getter, build.json, the env stamp) and prepare-env.cjs stamps
+environment.prod.ts BEFORE ng build - the old after-order landed the number
+one build late; Settings reads v0.1.32, never a stale 0.1.3. (3) ROUND B -
+capacitor.config + the Android platform + the brand kit's ionic/ set
+generated 136 Android assets (mipmaps, adaptive fg/bg, light+dark splashes,
+@capacitor/assets); the camera wired into the profile flow (native
+camera/gallery on the shell via Camera.getPhoto, the web file picker
+unchanged); farm.visionTier (none|advanced) is the AI-VISION entitlement
+the advanced packages hang on (compute, count, label, identify, measure)
+- set server-side only, surfaced as the locked Settings line with the
+Harvest-gold Advanced chip. Live: the profile probe (rename, photo, junk
+refused, /me persistence, revert) all green; the Settings probe (profile
+renders, the alert pre-filled, the vision chip, the note fold intact).
+THE APK BUILD is the one step needing the founder's Android SDK:
+cd android && ./gradlew assembleDebug (or npx cap open android).**
 **22 THE VERSION NOTE (app): a letter to the first farmer, OPEN at the
 render-top of Settings - her whole shamba now carries schedules (27 crops,
 9 animal groups, four of them just unlocked), the season laid out on Today
