@@ -173,6 +173,15 @@ every state change logged to /var/log/farmline-watch.log and, when
 FARMLINE_ALERT_WEBHOOK is armed in /opt/zyppar-server/.env, POSTed to
 wherever she reads it. THE AGENT COULD NOT SSH (the droplet rejects both
 keys from this machine) — hence the one paste for the founder.**
+**ROUTING (the founder, 2026-10-07): the DROPLET work is HANDOFFED to the
+remote-access thread via D:/TODOs/Farmline.txt (this agent has no SSH -
+publickey denied from its machine). The handoff carries: the law, the
+verified state, the six-step work list (the dry generator run, the
+proposal review for the ~:440 stale line, the apply by the founder’s
+hand, the watch install, the webhook, the guarantee-package cleanup)
+and the report-back expectation. This agent stays on the code repos.
+Also: the ensure/deploy tooling is now the REQUEST GENERATOR (41e83d2)
+- it never touches /etc/nginx; the watch is check-and-tell (82c78f8).**
 **THE NGINX LAW (the founder, 2026-10-07 — HARD, supersedes every nginx
 automation): NO SCRIPT WRITES NGINX. Not the watch, not the ensure on a
 cron, not an agent over SSH. nginx serves THREE apps on this droplet —
