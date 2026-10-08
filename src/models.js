@@ -48,6 +48,12 @@ const farmSchema = new Schema({
   // the vision compute lands (a later ladder), 'advanced' unlocks it.
   visionTier: { type: String, enum: ['none', 'advanced'], default: 'none' },
 
+  // THE LIVING DEMO (the founder, 2026-10-08: "people need to SEE"): exactly
+  // one farm carries isDemo:true — the demo login route issues a REAL farmer
+  // token for it (no secrets on the wire; the farm holds only fictional data
+  // and can be re-seeded whole at any time).
+  isDemo: { type: Boolean, default: false, index: true },
+
   // ── the finish line (spec v1 §3) — required income is a 12-month PROFILE,
   //    not a flat number: school fees and harvests are lumpy. ──
   requiredIncome: {
