@@ -39,7 +39,18 @@ const DEMO_SLUG = 'kimani-farms';
     const oldConvos = await Conversation.find({ farmId: fid }).distinct('_id');
     await Message.deleteMany({ conversationId: { $in: oldConvos } });
     await Farm.deleteOne({ _id: fid });
-    console.log('  previous demo replaced');
+    // THE DEMO'S FACE: the founder drops kimani.jpg into
+  // farmline-app/src/assets/images/ — the seed finds it, base64s it, and the
+  // demo farm wears it (the buyer’s guide and the share cards carry it).
+  let photo = '';
+  try {
+    const p = require('path').join(__dirname, '..', '..', 'farmline-app', 'src', 'assets', 'images', 'kimani.jpg');
+    if (require('fs').existsSync(p)) {
+      photo = 'data:image/jpeg;base64,' + require('fs').readFileSync(p).toString('base64');
+      console.log('  photo: kimani.jpg found — the demo farm wears it');
+    }
+  } catch { /* no photo yet — the demo still works */ }
+  console.log('  previous demo replaced');
   }
 
   // ── the farm ────────────────────────────────────────────────────────────────
@@ -55,6 +66,7 @@ const DEMO_SLUG = 'kimani-farms';
     trust: { withdrawalAdherence: 1, vaccinationsCurrent: true, responseRate: 0.95, fulfilmentRate: 0.97, ordersFulfilled: 34 },
     confidence: { grade: 'high', daysOfHistory: 64, categorisedPct: 0.98, lastLoggedAt: day(-1) },
     isDemo: true,
+    photo,
   });
   console.log('  farm:', farm.name, farm._id);
 
