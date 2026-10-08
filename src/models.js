@@ -432,10 +432,10 @@ const messageSchema = new Schema({
   // and an empty string is present. This would have crashed the SECOND message in
   // every conversation.
   clientId: { type: String },
-  // THE PHOTO IN THE THREAD (A2 tranche 4, cloned from the farm-photo pattern):
-  // a client-downsized JPEG data URL (the client caps itself; the route re-caps).
-  // Optional — a message is text OR text+photo, never photo alone unattended.
-  photo: { type: String, default: '' },
+  // THE SECOND photo DECLARATION REMOVED (the audit's hygiene, 2026-10-08):
+  // messageSchema declared `photo` twice — the later line silently overwrote
+  // the earlier one (harmless in Mongoose, but a second place to drift). One
+  // declaration above is the field.
   readByFarmer: { type: Boolean, default: false },
   readByCustomer: { type: Boolean, default: false },
 }, { timestamps: true });

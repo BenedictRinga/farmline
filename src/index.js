@@ -212,9 +212,14 @@ api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
     customer = await Customer.create({ phone: String(phone), name });
     // Virtual mode is only usable if a new buyer has something to spend, so the
     // first visit grants a starting credit. Real mode needs none of this.
+    // THE AUDIT'S 500 CLOSED (2026-10-08): the grant rides the LEDGER, whose
+    // farmId is required — a caller with no slug (farm: null) used to throw a
+    // raw ValidationError and answer 500. Without a farm context the honest
+    // answer is the token with granted: 0 — the credit arrives when they reach
+    // a farm through its link, which is the only way the app calls this.
     if (config.moneyMode === 'virtual') {
-      const farm = slug ? await Farm.findOne({ slug }) : null;
-      granted = await money.grantStartingZU({ farm, customer, zu: 500 });
+      const farm = slug ? await Farm.findOne({ slug }).select('_id').lean() : null;
+      if (farm) granted = await money.grantStartingZU({ farm, customer, zu: 500 });
     }
   }
   const bal = await money.balance({ ownerType: 'customer', ownerId: customer._id, mode: 'virtual' });
@@ -633,6 +638,53 @@ api.get('/farm/:farmId/animal/:animalId', auth.requireAuth('farmer'), auth.requi
   });
 }));
 
+// ── THE ANIMAL'S OWN EDIT (the founder's audit ruling, 2026-10-08: "iv-A").
+// Until now an animal was write-once: no correction, no for-sale, no sold, no
+// died — the demo showed a cow priced at KES 95,000 that no real farmer could
+// reproduce, and the shop's animalForSale shelf could never be stocked. This
+// route is the story page's hand. The same allowlist discipline as the profile
+// route: only these fields; a body the farmer can fix is refused plainly. A
+// status change is a statement, not a deletion — nothing is archived.
+api.patch('/farm/:farmId/animals/:animalId', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const b = req.body || {};
+  const a = await Animal.findOne({ _id: req.params.animalId, farmId: req.params.farmId });
+  if (!a) return bad(res, 404, 'animal not found');
+  const set = {};
+  if (b.name !== undefined) set.name = String(b.name).trim().slice(0, 40);
+  if (b.tag !== undefined) set.tag = String(b.tag).trim().slice(0, 20);
+  if (b.sex !== undefined) set.sex = String(b.sex).trim().slice(0, 10);
+  if (b.bornOn !== undefined) set.bornOn = b.bornOn ? new Date(b.bornOn) : null;
+  if (b.weightKg !== undefined) {
+    const w = Number(b.weightKg);
+    if (!Number.isFinite(w) || w < 0) return bad(res, 400, 'the weight must be a number');
+    set.weightKg = w;
+  }
+  if (b.status !== undefined) {
+    if (!['alive', 'forSale', 'sold', 'dead'].includes(String(b.status))) {
+      return bad(res, 400, 'status must be alive, forSale, sold or dead');
+    }
+    set.status = String(b.status);
+  }
+  if (b.salePrice !== undefined) {
+    if (b.salePrice === null) set.salePrice = 0;
+    else {
+      const p = Number(b.salePrice);
+      if (!Number.isFinite(p) || p < 0) return bad(res, 400, 'the price must be a number');
+      set.salePrice = p;
+    }
+  }
+  if (!Object.keys(set).length) return bad(res, 400, 'nothing to update');
+  Object.assign(a, set);
+  await a.save();
+  const now = new Date();
+  return ok(res, { animal: {
+    _id: String(a._id), name: a.name, tag: a.tag, species: a.species, sex: a.sex,
+    bornOn: a.bornOn, weightKg: a.weightKg, status: a.status,
+    salePrice: a.salePrice || null, photo: a.photo || '',
+    ageMonths: a.bornOn ? Math.floor((now - new Date(a.bornOn)) / (86400000 * 30.44)) : null,
+  } });
+}));
+
 // ──────────────────────────────────────────────────────────────────────────────
 // REVERSAL — correct it, undo it, put it back. One pattern, all three kinds.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1012,8 +1064,23 @@ api.post('/farm/:farmId/orders/:orderId/stage', auth.requireAuth('farmer'), auth
 // available over REST so a phone that lost its socket can still read and send.
 // ══════════════════════════════════════════════════════════════════════════════
 
-/** Open (or continue) the thread with a farm. Customer-initiated, from the shop. */
-api.post('/conversations', auth.requireAuth('customer'), wrap(async (req, res) => {
+/** Open (or continue) the thread with a farm. Customer-initiated, from the shop;
+ *  ALSO the farmer's order-anchored open (the audit's dead "Write to the buyer"
+ *  on Oda — 2026-10-08). The farmer supplies only the ORDER: the buyer is read
+ *  from it, scoped to the farmer's OWN farm, never from the wire. */
+api.post('/conversations', auth.requireAuth('customer', 'farmer'), wrap(async (req, res) => {
+  if (req.auth.typ === 'farmer') {
+    const orderId = String(req.body?.orderId || '');
+    if (!orderId) return bad(res, 400, 'an orderId is required to open a thread from the farm side');
+    const order = await Order.findOne({ _id: orderId, farmId: req.auth.sub }).lean();
+    if (!order) return bad(res, 404, 'order not found on your farm');
+    if (!order.customerId) return bad(res, 404, 'that order has no buyer account to message');
+    const conv = await chat.openConversation({
+      farmId: order.farmId, customerId: order.customerId, orderId: order._id,
+    });
+    if (!conv) return bad(res, 404, 'could not open the conversation');
+    return ok(res, { conversation: shapeConversation(conv) });
+  }
   const slug = String(req.body?.slug || '').trim();
   const farm = slug
     ? await Farm.findOne({ slug }).select('_id')
@@ -1132,11 +1199,22 @@ api.get('/farm/:farmId/ladder', auth.requireAuth('farmer'), auth.requireFarmScop
   });
 }));
 
-/** Accepting a rung is an explicit act. Nothing is ever charged silently. */
+/** Accepting a rung is an explicit act. Nothing is ever charged silently.
+ *  THE PAID WALL HOLDS (the founder's audit ruling, 2026-10-08: "v-A"): until
+ *  the payment rounds build activation, a PAID rung is refused — whatever the
+ *  readiness says, and no force bypasses it. A farm that could "accept" a
+ *  subscription nothing was bought for would carry a phantom badge and a mess
+ *  for the day real payments arrive. The free rungs keep the data gates. */
 api.post('/farm/:farmId/ladder/accept', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const id = String(req.body?.rung || '');
   const r = ladder.byId(id);
   if (!r) return bad(res, 400, 'unknown rung');
+  if (!r.free) {
+    return res.status(403).json({
+      ok: false,
+      error: 'the paid rungs arrive with the paid rounds — nothing to activate yet',
+    });
+  }
   const farm = await Farm.findById(req.params.farmId).lean();
   const facts = await farmFacts(req.params.farmId);
   const read = ladder.readiness(facts);
@@ -1224,15 +1302,10 @@ api.get('/shop/:slug', wrap(async (req, res) => {
   });
 }));
 
-/** ENQUIRE — a message to the farmer. Response time is a trust signal, so it is
- *  a real thread, not a bot. */
-api.post('/shop/:slug/enquire', auth.requireAuth('customer', 'farmer'), wrap(async (req, res) => {
-  const farm = await Farm.findOne({ slug: req.params.slug }).lean();
-  if (!farm) return bad(res, 404, 'no such farm');
-  const text = String(req.body?.text || '').slice(0, 600);
-  if (!text.trim()) return bad(res, 400, 'a message is required');
-  return ok(res, { received: true, at: new Date().toISOString() });
-}));
+// ── THE ENQUIRE DOOR IS GONE (the founder's audit ruling, 2026-10-08: "iii-A").
+// It answered {received:true} while storing nothing and telling nobody — a door
+// that lied. The REAL chat (POST /conversations) is the contact path: every
+// message persists, the farmer sees it, the thread is the record.
 
 /**
  * ORDER.

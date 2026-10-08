@@ -240,6 +240,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       : bad(`a real push returned "${attempt.status}" — success must come only from the callback`);
   }
 
+  // ── THE BALANCE READS ONLY SETTLED MONEY (the audit's fix, 2026-10-08) ──
+  // The mpesa rail writes PENDING (PIN not yet entered) and FAILED (refused
+  // push) rows direction 'in'; the old aggregate counted them as RECEIVED.
+  // Proven at the module level against THROWAWAY ledger rows (a probe farm id
+  // that exists nowhere else), created and deleted inside this block.
+  {
+    const mongoose = require('mongoose');
+    const { Ledger } = require('../src/models');
+    const moneyMod2 = require('../src/money');
+    const probeId = new mongoose.Types.ObjectId();
+    try {
+      await Ledger.insertMany([
+        { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 1000, ref: 'FL-BAL-SETTLED', status: 'settled' },
+        { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 400, ref: 'FL-BAL-PENDING', status: 'pending', checkoutRequestId: 'ws_BAL_P' },
+        { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 250, ref: 'FL-BAL-FAILED', status: 'failed' },
+      ]);
+      const bal = await moneyMod2.balance({ ownerType: 'farm', ownerId: probeId, mode: 'mpesa' });
+      bal === 1000
+        ? ok('the mpesa balance counts SETTLED money only (pending/failed excluded)')
+        : bad(`THE BALANCE COUNTS MONEY THAT DID NOT MOVE — got ${bal}, want 1000`);
+    } finally {
+      await Ledger.deleteMany({ farmId: probeId }).catch(() => {});
+    }
+  }
+
   console.log(`\n${fail ? `CHAT+MONEY FAILED — ${fail} problem(s).` : 'CHAT+MONEY PASSED — both doors work, and the rail is honest.'}\n`);
   process.exit(fail ? 1 : 0);
 })();

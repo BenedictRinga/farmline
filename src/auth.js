@@ -117,6 +117,14 @@ const mints = new Map(); // ip -> { n, ts }
 function mintRateLimit(req, res, next) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '?');
   const now = Date.now();
+  // THE AUDIT'S SMALL LEAK (2026-10-08): the valve never pruned — every IP that
+  // ever minted stayed in the map for the life of the process. On a public
+  // mint endpoint that is unbounded growth. Sweep the stale entries whenever
+  // the map grows past a few hundred; a sweep this cheap never matters to a
+  // request, and the live window keeps its count.
+  if (mints.size > 500) {
+    for (const [k, v] of mints) if (now - v.ts > 3600_000) mints.delete(k);
+  }
   const rec = mints.get(ip) || { n: 0, ts: now };
   if (now - rec.ts > 3600_000) { rec.n = 0; rec.ts = now; }
   rec.n += 1;

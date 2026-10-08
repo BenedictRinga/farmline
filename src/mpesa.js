@@ -99,6 +99,11 @@ async function accessToken(cred) {
   const basic = Buffer.from(`${cred.consumerKey}:${cred.consumerSecret}`).toString('base64');
   const r = await fetch(`${baseUrl(cred.env)}/oauth/v1/generate?grant_type=client_credentials`, {
     headers: { Authorization: 'Basic ' + basic },
+    // A BOUNDED HANDSHAKE (the audit's robustness fix, 2026-10-08): a hung
+    // Daraja call used to hang the buyer's checkout indefinitely — the vision
+    // route has a timeout and the money path did not. OAuth answers in under
+    // a second when it answers at all.
+    signal: AbortSignal.timeout(10_000),
   });
   const j = await r.json().catch(() => null);
   if (!r.ok || !j?.access_token) {
@@ -147,6 +152,10 @@ async function stkPush({ cred, phone, amountKES, accountRef = '', description = 
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    // THE SAME BOUND (the audit's robustness fix, 2026-10-08): the buyer waits
+    // on this call — a hung push must not hang the checkout. The vision route
+    // has a timeout; the money path now has one too.
+    signal: AbortSignal.timeout(30_000),
   });
   const j = await r.json().catch(() => null);
 

@@ -134,7 +134,17 @@ async function complete({ farm, eventId, byMemberId = null, productUsed = '', sp
   const ev = await ScheduledEvent.findOne({ _id: eventId, farmId: farm._id });
   if (!ev) return { ok: false, error: 'not found' };
 
-  const species = speciesHint || guessSpecies(ev.subjectLabel) || '';
+  // THE SPECIES IS A DB READ AWAY (the audit's silent-hold fix, 2026-10-08):
+  // complete() used to GUESS the species from the subject's LABEL — a group
+  // named "Shed A" or "Zawadi's pen" matched no protocol, so the completion
+  // wrote kind 'note', opened NO withdrawal hold and scheduled NO next date:
+  // the compliance step silently skipped. The event knows its subject — read
+  // the truth first, and only fall back to the hint and the label guess.
+  const subjectSpecies =
+    ev.subjectType === 'group' ? (await AnimalGroup.findById(ev.subjectId).select('species').lean())?.species
+    : ev.subjectType === 'cropcycle' ? (await CropCycle.findById(ev.subjectId).select('crop').lean())?.crop
+    : null;
+  const species = speciesHint || subjectSpecies || guessSpecies(ev.subjectLabel) || '';
   const proto = findProtocol(species, ev.intervention);
 
   ev.status = 'done';
@@ -262,7 +272,6 @@ function guessSpecies(label = '') {
   if (/millet|mawele/.test(s)) return 'millet';
   if (/carrot|karoti/.test(s)) return 'carrot';
   if (/spinach|mchicha/.test(s)) return 'spinach';
-  if (/sweetpotato|viazi tamu/.test(s)) return 'sweetpotato';
   if (/cassava|muhogo/.test(s)) return 'cassava';
   if (/pea|minji/.test(s)) return 'peas';
   if (/tea|chai/.test(s)) return 'tea';
@@ -270,26 +279,12 @@ function guessSpecies(label = '') {
   return '';
 }
 
-/** Set up a whole farm's schedule from its plots, groups and crop cycles. */
-async function materialiseFarm(farm) {
-  let total = 0;
-  const groups = await AnimalGroup.find({ farmId: farm._id, active: true }).lean();
-  for (const g of groups) {
-    const r = await materialise({
-      farmId: farm._id, subjectType: 'group', subjectId: g._id,
-      subjectLabel: g.label || g.species, species: g.species, anchor: new Date(),
-    });
-    total += r.created;
-  }
-  const cycles = await CropCycle.find({ farmId: farm._id, status: { $in: ['planned', 'growing'] } }).lean();
-  for (const c of cycles) {
-    const r = await materialise({
-      farmId: farm._id, subjectType: 'cropcycle', subjectId: c._id,
-      subjectLabel: c.crop, species: c.crop, anchor: c.plantedOn || new Date(),
-    });
-    total += r.created;
-  }
-  return { created: total };
-}
+// ── DEAD CODE REMOVED (the audit's hygiene, 2026-10-08): materialiseFarm()
+// had ZERO callers anywhere — every materialisation path goes through the
+// routes (groups/crops) or the seed, each of which calls materialise()
+// directly. A second entry point that nothing exercises is a way for the two
+// to drift. Gone. Also removed en passant: the unreachable duplicate
+// 'sweetpotato' line in guessSpecies (the specific is tested at line ~256;
+// the copy further down could never be reached).
 
-module.exports = { materialise, materialiseFarm, today, complete, findProtocol, guessSpecies };
+module.exports = { materialise, today, complete, findProtocol, guessSpecies };

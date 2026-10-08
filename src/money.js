@@ -54,7 +54,12 @@ function mpesaArmedFor(farm) {
  * A stored balance that disagrees with its own history is how money bugs start.
  */
 async function balance({ ownerType, ownerId, mode = 'virtual' }) {
-  const match = { mode };
+  // THE AUDIT'S MONEY-TRUTH FIX (2026-10-08): only SETTLED rows are money.
+  // The mpesa rail writes PENDING rows (the buyer has been asked, the PIN not
+  // entered) and FAILED rows (a refused push) — both direction 'in' — and the
+  // unfiltered aggregate counted them as RECEIVED. A farmer's "received" line
+  // must never grow before the money moved.
+  const match = { mode, status: 'settled' };
   if (ownerType === 'farm') match.farmId = ownerId;
   else match.customerId = ownerId;
   const rows = await Ledger.aggregate([
@@ -87,8 +92,19 @@ async function charge({ farm, customer, order, amountKES, mode, phone }) {
 
   // ── VIRTUAL (ZU) ────────────────────────────────────────────────────────────
   if (useMode === 'virtual') {
+    // THE AUDIT'S INFINITE-ZU HOLE CLOSED (2026-10-08): a farmer token has no
+    // buyer account — `customer ? balance : Infinity` read a balance of
+    // Infinity and minted ZU out of thin air. A payment needs a buyer. The
+    // ORDER itself still goes through (the work is the point); it rides as
+    // unpaid until a buyer account pays it.
+    if (!customer) {
+      return {
+        ok: false, mode: 'virtual', status: 'failed',
+        message: 'payment needs a buyer account — the order is saved as unpaid',
+      };
+    }
     const { zu } = quote(kes);
-    const bal = customer ? await balance({ ownerType: 'customer', ownerId: customer._id, mode: 'virtual' }) : Infinity;
+    const bal = await balance({ ownerType: 'customer', ownerId: customer._id, mode: 'virtual' });
     if (bal < zu) {
       return {
         ok: false, mode: 'virtual', status: 'failed', needed: zu, available: bal,
@@ -194,11 +210,10 @@ async function settleByCheckout(checkoutRequestId, parsed) {
   return { ok: r.matchedCount > 0, matched: r.matchedCount };
 }
 
-/** Confirm an M-Pesa payment from the Daraja callback (or the farmer's own entry). */
-async function settle(ref, { mpesaCode = '' } = {}) {
-  const r = await Ledger.updateOne({ ref, mode: 'mpesa' }, { $set: { status: 'settled', note: mpesaCode ? 'M-Pesa ' + mpesaCode : 'settled' } });
-  return { ok: r.modifiedCount > 0 };
-}
+// ── DEAD CODE REMOVED (the audit's hygiene, 2026-10-08): money.settle() had
+// ZERO callers anywhere (route, app, tests) — settlement is settleByCheckout,
+// keyed on the CheckoutRequestID that only the callback knows. A ref-keyed
+// "settle" beside it was a second way to claim money arrived. Gone.
 
 /** Give a new customer a starting ZU credit so the virtual mode is usable at once. */
 async function grantStartingZU({ farm, customer, zu = 500, note = 'starting credit (ZU demo)' }) {
@@ -211,5 +226,5 @@ async function grantStartingZU({ farm, customer, zu = 500, note = 'starting cred
 
 module.exports = {
   MODES, modeFor, quote, mpesaConfigured, mpesaArmedFor,
-  balance, charge, settle, settleByCheckout, grantStartingZU,
+  balance, charge, settleByCheckout, grantStartingZU,
 };

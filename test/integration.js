@@ -410,8 +410,16 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   assert(lad.body.recommended <= 2, 'a 1-day-old farm is NOT pushed to a paid rung (no premature sell)');
 
   console.log('\n=== 14. accepting a rung is explicit, and gated ===');
-  const tooSoon = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict' } });
-  assert(tooSoon.status === 409, `VERDICT accepted too early is refused (${tooSoon.status}) with gaps listed`);
+  // THE PAID WALL FIRST (the founder's ruling, 2026-10-08 "v-A"): a paid rung
+  // is refused with 403 whatever the readiness — force or not. The readiness
+  // gate itself is proven on a FREE rung ('sharpen' — the fresh farm's history
+  // is 0 days, the 21-day gap is live).
+  const paid = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict' } });
+  assert(paid.status === 403, `a PAID rung is refused while the paid rounds are unbuilt (${paid.status})`);
+  const forced = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict', force: true } });
+  assert(forced.status === 403, `force cannot bypass the paid wall (${forced.status})`);
+  const tooSoon = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'sharpen' } });
+  assert(tooSoon.status === 409, `SHARPEN accepted too early is refused (${tooSoon.status}) with gaps listed`);
   assert(tooSoon.body?.gaps?.length > 0, 'and it says exactly what is missing');
   const okRung = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'record' } });
   assert(okRung.status === 200, 'a rung the data supports is accepted');
@@ -516,6 +524,99 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(rm.status === 200, 'the photograph can be removed');
     const me3 = await req('GET', '/me', { token });
     assert(me3.body?.farm?.photo === '', 'and removal persists too');
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // THE AUDIT CURATIONS (2026-10-08 — the founder's five rulings, server side)
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== 11. THE ANIMAL\'S OWN EDIT (iv-A: for sale / sold / died / correct) ===');
+  {
+    const g = await req('POST', `/farm/${farmId}/groups`, {
+      token, body: { species: 'goats', label: 'audit goats', count: 2, productionKind: 'none' },
+    });
+    assert(g.status === 200 && g.body?.group?._id, 'a goat group stands up for the audit');
+    const a = await req('POST', `/farm/${farmId}/animals`, {
+      token, body: { groupId: g.body.group._id, name: 'Audit Ewe', sex: 'female', weightKg: 33 },
+    });
+    assert(a.status === 200 && a.body?.animal?._id, 'a tracked animal is added');
+    const animalId = a.body.animal._id;
+
+    const junk = await req('PATCH', `/farm/${farmId}/animals/${animalId}`, { token, body: { status: 'xyz' } });
+    assert(junk.status === 400, `a junk status is refused plainly (${junk.status})`);
+    const junkPrice = await req('PATCH', `/farm/${farmId}/animals/${animalId}`, { token, body: { salePrice: 'expensive' } });
+    assert(junkPrice.status === 400, `a junk price is refused plainly (${junkPrice.status})`);
+
+    const fs = await req('PATCH', `/farm/${farmId}/animals/${animalId}`, {
+      token, body: { status: 'forSale', salePrice: 4500 },
+    });
+    assert(fs.status === 200 && fs.body?.animal?.status === 'forSale' && fs.body?.animal?.salePrice === 4500,
+      'the farmer can put her own animal up for sale with a price');
+
+    // the shelf the demo advertised but no farmer could ever stock. affects []
+    // because the suite's farm carries a live 14-day MEAT hold from section 5's
+    // deworming — and the projection suppresses by affect, farm-wide, WITH the
+    // reason: the withdrawal machine suppressing a for-sale animal is the
+    // keystone behaviour, proven by the milk case in section 6. Here we prove
+    // the COUNT itself.
+    const sell = await req('POST', `/farm/${farmId}/sellables`, {
+      token, body: { product: 'goats', label: 'Goat', unit: 'head', price: 5000,
+        source: { kind: 'animalForSale', product: 'goats' }, affects: [] },
+    });
+    assert(sell.status === 200, 'the goat shelf item is priced');
+    const shop = await req('GET', `/farm/${farmId}/sellables`, { token });
+    const goat = (shop.body?.availability || []).find((x) => x.product === 'goats');
+    assert(goat && goat.available === true && goat.qty === 1,
+      `the animalForSale shelf is finally stockable by a real farmer (qty ${goat?.qty})`);
+
+    const sold = await req('PATCH', `/farm/${farmId}/animals/${animalId}`, { token, body: { status: 'sold' } });
+    assert(sold.status === 200 && sold.body?.animal?.status === 'sold', 'the animal can be marked sold');
+    const alive = await req('PATCH', `/farm/${farmId}/animals/${animalId}`, { token, body: { status: 'alive' } });
+    assert(alive.status === 200 && alive.body?.animal?.status === 'alive',
+      'a mis-marked animal can be set back to alive (the mistake is reversible)');
+    const fix = await req('PATCH', `/farm/${farmId}/animals/${animalId}`, { token, body: { name: 'Audit Ewe II', weightKg: 34 } });
+    assert(fix.status === 200 && fix.body?.animal?.name === 'Audit Ewe II' && fix.body?.animal?.weightKg === 34,
+      'the animal\'s details are correctable (a mistyped name/weight is no longer permanent)');
+  }
+
+  console.log('\n=== 12. THE PAID WALL HOLDS (v-A) ===');
+  {
+    const refused = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict' } });
+    assert(refused.status === 403, `a PAID rung is refused while the paid rounds are unbuilt (${refused.status})`);
+    const forced = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict', force: true } });
+    assert(forced.status === 403, `force cannot bypass the paid wall (${forced.status})`);
+  }
+
+  console.log('\n=== 13. THE LYING DOOR IS GONE (iii-A) ===');
+  {
+    const enq = await req('POST', `/shop/${slug}/enquire`, { body: { text: 'hello' } });
+    assert(enq.status === 404, `the enquire route that pretended to receive no longer exists (${enq.status})`);
+  }
+
+  console.log('\n=== 14. A FARMER TOKEN CANNOT PAY (the Infinity-ZU hole) ===');
+  {
+    const money0 = await req('GET', `/farm/${farmId}/money`, { token });
+    const zu0 = money0.body?.balances?.zu;
+    const fOrder = await req('POST', `/shop/${slug}/order`, {
+      token, body: { lines: [{ product: 'eggs', qty: 1 }], pay: true },
+    });
+    assert(fOrder.status === 201, `a farmer can still place the order — the work is the point (${fOrder.status})`);
+    assert(fOrder.body?.payment && fOrder.body.payment.status !== 'paid',
+      `the payment did NOT go through (status: ${fOrder.body?.payment?.status})`);
+    const money1 = await req('GET', `/farm/${farmId}/money`, { token });
+    assert(money1.body?.balances?.zu === zu0,
+      `no ZU was minted out of thin air (balance ${zu0} -> ${money1.body?.balances?.zu})`);
+  }
+
+  console.log('\n=== 15. THE CAPTURE RECORDS A REAL NUMBER (ii-C contract) ===');
+  {
+    const cap = await req('POST', `/farm/${farmId}/logs`, {
+      token, body: { log: { kind: 'milk', product: 'milk', quantity: 7, unit: 'litre', clientId: 'audit-cap-1' } },
+    });
+    assert(cap.status === 200, 'a milk capture with the farmer-typed quantity is accepted');
+    const dup = await req('POST', `/farm/${farmId}/logs`, {
+      token, body: { log: { kind: 'milk', product: 'milk', quantity: 7, unit: 'litre', clientId: 'audit-cap-1' } },
+    });
+    assert(dup.status === 200 && dup.body?.accepted?.[0]?.duplicate === true, 'the replay is still idempotent');
   }
 
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
