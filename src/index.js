@@ -1378,6 +1378,15 @@ server.listen(config.port, () => {
   console.log(`  chat=${io ? 'socket.io at /socket-farmline/ (+ REST)' : 'REST only (socket.io not installed)'}  env=${config.envName}`);
   migrateLegacyIndexes().catch((e) => console.warn('[farmline] index migration error:', e.message));
 });
+
+  // ── 2026-10-08 THE BOOT-SEED (the founder: 'feeding the demo via a script
+  // after deployment' — retired): the Kimani Farms demo self-seeds at boot,
+  // fire-and-forget, idempotent (an existing demo farm is replaced whole).
+  // No post-deploy hands, no manual script, no nginx. The demo data is
+  // fictional and re-seedable by design.
+  setTimeout(() => {
+    try { require('../scripts/seed-demo-farm.cjs'); } catch (e) { console.error('[demo-seed] failed:', e.message); }
+  }, 2500);
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     if (io) io.close();
