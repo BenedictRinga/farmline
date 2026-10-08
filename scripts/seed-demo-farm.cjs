@@ -64,7 +64,7 @@ const DEMO_SLUG = 'kimani-farms';
   // ── the farm ────────────────────────────────────────────────────────────────
   const farm = await Farm.create({
     name: 'Kimani Farms', slug: DEMO_SLUG, area: 'Limuru, Kiambu', county: 'Kiambu',
-    story: 'Three acres by the river: five dairy cows, a small goat herd and two hundred laying hens. The maize feeds the cows; the napier feeds the cows; the cows feed the family. Every crate of eggs and every litre of milk is sold here on farmline — walk the whole farm, then make your own.',
+    story: 'A fictional farm, built to be walked: three acres by the river, five dairy cows, a small goat herd and two hundred laying hens. The maize feeds the cows; the napier feeds the cows; the cows pay the ladder. Every crate of eggs and every litre of milk is sold here on farmline — walk the whole farm, then make your own.',
     verifiedFarm: true, rung: 4, rungAcceptedAt: day(-120),
     visionTier: 'advanced', // the demo shows the full ladder — including AI Vision
     zuBalance: 0,
