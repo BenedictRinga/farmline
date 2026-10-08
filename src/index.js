@@ -1385,7 +1385,12 @@ server.listen(config.port, () => {
   // No post-deploy hands, no manual script, no nginx. The demo data is
   // fictional and re-seedable by design.
   setTimeout(() => {
-    try { require('../scripts/seed-demo-farm.cjs'); } catch (e) { console.error('[demo-seed] failed:', e.message); }
+    // THE ISOLATION (the crash-loop lesson): the seed script calls its own
+    // process.exit(0) — require()ing it here killed the server (122 pm2
+    // restarts). As a CHILD PROCESS its exit is its own; the server lives.
+    const { spawn } = require('child_process');
+    const child = spawn(process.execPath, ['scripts/seed-demo-farm.cjs'], { cwd: __dirname, stdio: 'inherit' });
+    child.on('exit', (code) => console.log('[demo-seed] finished, code', code));
   }, 2500);
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
