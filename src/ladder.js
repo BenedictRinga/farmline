@@ -38,7 +38,13 @@ const RUNGS = [
     // What the farmer GETS.
     gets: {
       sw: ['Orodha ya kazi ya leo', 'Ratiba ya dawa, minyoo na kuua kupe', 'Vikumbusho vya kupanda na kuvuna'],
-      en: ["Today's work list", 'Spray, deworming and vaccination schedule', 'Planting and harvest reminders'],
+      en: ["Today\'s work list", 'Spray, deworming and vaccination schedule', 'Planting and harvest reminders'],
+    },
+    // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
+    // the rungs — users and investors aspire, the build follows the ladder).
+    ai: {
+      sw: ['Uliza farmline chochote kuhusu rekodi zako — kwa maneno rahisi', 'Taarifa ya mwezi kutoka farmline: shamba lako linasema nini'],
+      en: ['Ask farmline anything about your own records — in plain words', 'A monthly note from farmline: what your farm is telling you'],
     },
     commitment: { sw: 'Sekunde 20 kwa siku', en: '20 seconds a day' },
   },
@@ -54,6 +60,12 @@ const RUNGS = [
       sw: ['Historia ya maziwa, mayai, mavuno', 'Muhtasari wa mwezi kwa lugha rahisi'],
       en: ['Milk, egg and harvest history', 'A plain-language month summary'],
     },
+    // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
+    // the rungs — users and investors aspire, the build follows the ladder).
+    ai: {
+      sw: ['Rekodi zako zinazungumzwa — sauti zinakuwa mabano', 'Namba za shamba zinaelezwa, si kuonyeshwa tu'],
+      en: ['Your records, spoken back to you — voice notes become entries', 'The farm\'s numbers explained, never just shown'],
+    },
     commitment: { sw: 'Dakika 10 kwa wiki inatosha', en: '10 minutes a week is enough' },
   },
   {
@@ -62,11 +74,17 @@ const RUNGS = [
     question: { sw: 'Kipi kinafaa, kipi hakifai?', en: "What's working, what isn't?" },
     gets: {
       sw: ['Kinachobaki kwa kila lita, tray na gunia', 'Mlinganisho wa ekari: mahindi vs napier'],
-      en: ["What's left from each litre, tray and bag", 'The acre question: maize vs napier'],
+      en: ["What\'s left from each litre, tray and bag", 'The acre question: maize vs napier'],
     },
     gives: {
       sw: ['Rekodi gharama kwa maneno rahisi ("nilinunua mbolea 6,000")'],
       en: ['Record a cost in plain words ("bought fertiliser 6,000")'],
+    },
+    // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
+    // the rungs — users and investors aspire, the build follows the ladder).
+    ai: {
+      sw: ['Swali la ekari linajibiwa na data yako mwenyewe', 'Kilichofanya kazi na kisichofanya — linasomwa kwenye rekodi zako, si kutabiriwa'],
+      en: ['The acre question answered by your own data', 'What worked and what didn\'t — read from your records, not guessed'],
     },
     commitment: { sw: 'Dakika 15 kwa wiki', en: '15 minutes a week' },
   },
@@ -84,6 +102,12 @@ const RUNGS = [
       sw: ['Kipato unachohitaji (mshahara + bajeti)', 'Msimu wote wa miezi 12 (pamoja na karo)', 'Kurekodi mara kwa mara', 'Dakika 15 kwa mwezi kupitia'],
       en: ['The income you need (salary + household budget)', 'A 12-month profile (school fees included)', 'Keeping the record going', '15 minutes a month to review'],
     },
+    // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
+    // the rungs — users and investors aspire, the build follows the ladder).
+    ai: {
+      sw: ['Rekodi za kila siku kwa sauti — maziwa, mayai na mavuno, unazungumza si kuandika', 'AI Vision: piga pua mnyama mgonjwa au zao linaloharibika, upate ushauri wa afisa wa ugawaji', 'Barua ya wiki kutoka kwa akili ya farmline: shamba lako linasema nini', 'Piga pua risiti au slipi ya coop — inakuwa rekodi'],
+      en: ['Your daily records by voice — milk, eggs and harvest, spoken not typed', 'AI Vision: photograph a sick animal or a troubled crop, get the extension officer\'s read', 'A weekly letter from farmline\'s intelligence: what your farm is telling you', 'Photograph a receipt or a coop slip — it becomes a record'],
+    },
     commitment: { sw: 'Dakika 15 kwa mwezi', en: '15 minutes a month' },
     requires: { confidence: 'medium' },
   },
@@ -98,6 +122,12 @@ const RUNGS = [
     gives: {
       sw: ['Gharama za vitu unavyotaka kununua', 'Ekari na msimu wa kila shamba', 'Kupanga vs yaliyotokea'],
       en: ['Costs of what you plan to buy', 'Acres and seasons for each plot', 'Plan versus what actually happened'],
+    },
+    // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
+    // the rungs — users and investors aspire, the build follows the ladder).
+    ai: {
+      sw: ['Taarifa ya kila siku ya AI: kilichotokea, kimaanisha nini, nifanye nini', 'Uchunguzi wa kundi kwa pua — idadi ikilinganishwa na rekodi zako', 'Bei za soko za eneo lako, zikisomwa dhidi ya mavuno yako', 'Rekodi za sausi bila kikomo'],
+      en: ['The daily AI brief: what happened, what it means, what to do', 'Herd audits by photo — the count checked against your records', 'Market prices for your area, read against your harvest', 'Voice records without a cap'],
     },
     commitment: { sw: 'Dakika 20 kwa mwezi', en: '20 minutes a month' },
     requires: { confidence: 'high' },
@@ -114,6 +144,12 @@ const RUNGS = [
       sw: ['Wafanyakazi na majukumu yao', 'Kuweka kazi kila siku'],
       en: ['Your workers and their roles', 'Assigning the day\'s work'],
     },
+    // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
+    // the rungs — users and investors aspire, the build follows the ladder).
+    ai: {
+      sw: ['Afisa wa ugawaji wa AI mfukoni mwako — anajua historia ya shamba lako', 'Ratiba zinazotambua hali ya hewa: mvua ikisomwa dhidi ya mpango wako', 'Kasi ya kipekee kwa kila pua na kila swali'],
+      en: ['The AI extension officer in your pocket — it knows your farm\'s history', 'Weather-aware schedules: the rain read against your plan', 'Priority compute for every photo and every question'],
+    },
     commitment: { sw: 'Kila siku', en: 'Daily' },
   },
   {
@@ -127,6 +163,12 @@ const RUNGS = [
     gives: {
       sw: ['Rekodi kamili za fedha', 'Nyaraka na mikataba'],
       en: ['Complete financial records', 'Documents and contracts'],
+    },
+    // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
+    // the rungs — users and investors aspire, the build follows the ladder).
+    ai: {
+      sw: ['Duka linalozungumza: maswali ya wanaunuzi yanajibiwa kutoka kwa data halisi ya shamba lako', 'Mtandao wa tahadhari ya mapema: wadudu na magonjwa yaliyoonekana karibi nawe, wewe ndiye kwanza kujua', 'Wa kwanza kwenye kila akili mpya inayotoka farmline'],
+      en: ['A shop that talks: buyers\' questions answered from your farm\'s real data', 'The early-warning network: pests and diseases seen near you, flagged to you first', 'First in line for every new intelligence farmline ships'],
     },
     commitment: { sw: 'Kuendelea', en: 'Continuous' },
   },
@@ -221,6 +263,7 @@ function landing(rungId, lang = 'en') {
     whatYouGet: r.gets[lang] || r.gets.en,
     whatYouGive: r.gives[lang] || r.gives.en,
     commitment: r.commitment[lang],
+    aiLadder: (r.ai && (r.ai[lang] || r.ai.en)) || [],
     requires: r.requires || null,
   };
 }
