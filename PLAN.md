@@ -497,3 +497,27 @@ invented now).
 4. **Deploys that "legitimately" carry nginx config** (deploy.sh, the guarantee
    package) still fall under this rule: they announce the diff in their output
    and the founder pre-approves the script — no silent inserts.
+
+
+---
+
+## ⚖️ THE SUPERVISION PROTOCOL (the founder, 2026-10-08: the trusted session verifies the audit in D:/TODOs/WRITE_CODE.txt and supervises this thread's implementation)
+
+**Verified state of the audit (2026-10-08, the trusted session)**: every probed claim CONFIRMED against the code —
+- the maize kind is absent from the Log enum (models.js:223-227 → the capture 500s),
+- money.balance() has no status filter (money.js:56-70 → the PENDING/FAILED rows count as received),
+- /ladder/accept carries no payment gate and force:true bypasses readiness (index.js:1136-1152),
+- /shop/:slug/enquire stores nothing while claiming received (index.js:1229-1235),
+- POST /conversations gates to customer-only (index.js:1016 → the order-anchored farmer open 403s),
+- the farmer-token virtual payment branch reads `customer ? balance : Infinity` (money.js:91),
+- the today-page sign-out navigates without clearing the token (today.page.ts:295-305),
+- both empty prompt('')s exist (checkout.page.ts:139, shop/chat.page.ts:43).
+
+The audit's two preflight reds were THE TRUSTED SESSION'S OWN demo work — fixed and committed by the supervisor first (the arrow-back-outline registered in core/icons.ts; the demo chrome i18n'd — shamba.demoInvite/Exit/aria/demoNotReady, en+sw, parity held; **preflight OK**).
+
+**The implementing thread's rules (per piece, no exceptions)**:
+1. **The gates before every commit**: `npx tsc --noEmit -p tsconfig.app.json` EXIT:0 (app) or `node --check` + the route probe (server); the app preflight OK; `yarn smoke` green when the touched surface has a suite. A red gate = no commit.
+2. **The scope**: the audit's mechanical set (Tiers 1-3, 5, the hygiene) as ordered by the founder. The FIVE SCOPE DECISIONS (the phone-ask copy, the Leo capture shape, enquire delete-vs-wire, the animal status surface, the paid-wall gate) are THE FOUNDER'S RULINGS — do not touch them without the founder's word.
+3. **The forbidden**: nginx writes (the pass-through law); any storage write of the demo token (the takeover class); session-takeover patterns; invented probe paths (verify from the repo); .bak accumulation (the hygiene fix removes them).
+4. **The review gate**: every commit lands with the file:line summary in the message; the trusted session verifies each piece against the audit before the founder's push. The founder pushes personally.
+5. **The quiet tree**: the demo work is DONE (the trusted session's); this thread works alone — no mid-air collisions.
