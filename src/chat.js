@@ -167,51 +167,7 @@ async function postMessage({ conversationId, fromType, fromId, fromLabel = '', b
     },
   });
 
-  scheduleDemoReply(String(oid(conversationId)), fromType);
   return { ok: true, message: msg };
-}
-
-// ── THE DEMO AUTO-REPLY (the founder: the demo must be LIVE) ──────────────────
-// In the demo farm's threads, a farmer message is answered ~5s later by the
-// fictional customer with a canned line — the visitor sees a conversation
-// WORKING. Delivered through the same persistence path + the room broadcast
-// (an open thread sees it arrive live). Arms only for a demo farm; a real
-// farm's threads are never touched.
-function scheduleDemoReply(conversationId, fromType) {
-  if (fromType !== 'farmer') return;
-  (async () => {
-    const conv = await Conversation.findById(conversationId).select('farmId customerId customerLabel').lean();
-    if (!conv) return;
-    const farm = await Farm.findById(conv.farmId).select('isDemo').lean();
-    if (!farm || !farm.isDemo) return;
-    const LINES = [
-      'Sawa, noted — asante!',
-      'That works for me. See you then.',
-      'Perfect. NIMEKUBALI.',
-      'Okay — and the eggs are from today?',
-      'Thank you! I will confirm in the evening.',
-    ];
-    const body = LINES[Math.floor(Math.random() * LINES.length)];
-    const delay = 5000 + Math.floor(Math.random() * 3000);
-    const clientId = 'demo-reply-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-    setTimeout(async () => {
-      try {
-        const res = await postMessage({
-          conversationId, fromType: 'customer',
-          fromId: String(conv.customerId), fromLabel: conv.customerLabel,
-          body, clientId,
-        });
-        if (res.ok && ioRef) {
-          ioRef.to('conv:' + conversationId).emit('chat:message', {
-            _id: String(res.message._id), conversationId,
-            fromType: 'customer', fromLabel: conv.customerLabel,
-            body: res.message.body, photo: '', at: res.message.at,
-            clientId, duplicate: !!res.duplicate,
-          });
-        }
-      } catch { /* a dead demo reply harms nothing */ }
-    }, delay);
-  })().catch(() => { /* never break the real send */ });
 }
 
 async function history(conversationId, { limit = HISTORY_LIMIT } = {}) {

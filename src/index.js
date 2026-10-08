@@ -185,24 +185,6 @@ api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
   });
 }));
 
-// ── THE DEMO DOOR (the founder, 2026-10-08: "people need to SEE") ──────────
-// Issues a REAL farmer token for the ONE demo farm (Farm.isDemo). No secret
-// on the wire — the farm holds only fictional, re-seedable data; the real
-// accounts are untouched (a demo token scopes to that farm, exactly like a
-// login token). Rate-limited like every mint.
-api.post('/auth/demo', auth.mintRateLimit, wrap(async (req, res) => {
-  const farm = await Farm.findOne({ isDemo: true });
-  if (!farm) return bad(res, 404, 'the demo farm is not seeded yet');
-  const member = await Member.findOne({ farmId: farm._id, role: 'owner', active: true });
-  if (!member) return bad(res, 404, 'the demo farm is not seeded yet');
-  return ok(res, {
-    token: auth.mintFarmerToken(farm._id, member._id, member.role),
-    farm: { id: farm._id, name: farm.name, slug: farm.slug, rung: farm.rung },
-    member: { id: member._id, name: member.name, role: member.role },
-    demo: true,
-  });
-}));
-
 api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
   const { phone, name = '', slug = '' } = req.body || {};
   if (!phone) return bad(res, 400, 'phone is required');
