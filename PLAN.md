@@ -325,26 +325,6 @@ Probes: the 403 gate / the 503 not-armed / the 400 junk photo all PASS.
 TO ARM ON THE DROPLET: OPENROUTER_API_KEY=<key> in the .env (restart),
 then set-vision <farmId> advanced for the pilot farms.**
 **B2’S TAIL - DECLARED COMPLETE: the check, the ack, the apply, the manual
-**24 KIMANI FARMS - THE LIVING DEMO (the founder, 2026-10-08: “Remember
-Kimani Farms that you used at the beginning? It is time to now use it...”
-+ “people need to SEE”): the seed (scripts/seed-demo-farm.cjs, run on the
-droplet as appuser) builds the whole ladder in ONE fictional farm: 3 plots,
-5 crop cycles (maize/napier/kale/tomatoes/avocado) with REAL materialised
-schedules (56 events), 3 herds (cattle/goats/layers) with named
-individuals (Browny, Pesa, Njeri), a week of records, an active milk
-hold, the stocked shop front (milk/eggs/kale/avocado), 2 orders + a
-ledger, market observations, and 2 chat threads with fictional
-customers (Wanjiku Store, Mama Njeri). POST /auth/demo (rate-limited,
-public) mints a REAL farmer token for the demo farm only (isDemo on the
-schema, server-side). THE DEMO AUTO-REPLY: a farmer message in a demo
-thread is answered ~5s later by the fictional customer through the same
-persistence + room broadcast - the demo is LIVE. The probe: 10/10
-including the live reply. app build 35: a tiny-print
-“Kimani Farms - see it working” button in the Shamba header draws the tap;
-one tap mints the demo token, the visitor’s OWN session is parked and
-restored on exit (the demo never costs anyone their login); the Harvest-
-gold EXIT DEMO chip shows while inside. REMAINING: the founder runs the
-seed on the droplet once, then deploys both repos.**
 check, the mandatory floor, the socket accelerator, the announce door all
 live and verified. The one honest gap: notifications to a FULLY OFFLINE
 device need web-push (VAPID) - a fourth dependency against the cap of
