@@ -34,24 +34,32 @@ const DEMO_SLUG = 'kimani-farms';
       Log.deleteMany({ farmId: fid }), Hold.deleteMany({ farmId: fid }),
       Sellable.deleteMany({ farmId: fid }), Order.deleteMany({ farmId: fid }),
       Ledger.deleteMany({ farmId: fid }), Conversation.deleteMany({ farmId: fid }),
-      Price.deleteMany({ farmId: fid }),
+      PriceObservation.deleteMany({ farmId: fid }),
     ]);
     const oldConvos = await Conversation.find({ farmId: fid }).distinct('_id');
     await Message.deleteMany({ conversationId: { $in: oldConvos } });
     await Farm.deleteOne({ _id: fid });
-    // THE DEMO'S FACE: the founder drops kimani.jpg into
-  // farmline-app/src/assets/images/ — the seed finds it, base64s it, and the
-  // demo farm wears it (the buyer’s guide and the share cards carry it).
+    // The DEMO CUSTOMERS are global (customers are not farm-scoped) — the demo
+    // phones are reserved for the fiction, so they go with the farm.
+    await Customer.deleteMany({ phone: { $in: ['0700000008', '0700000007'] } });
+    console.log('  previous demo replaced');
+  }
+
+  // THE DEMO'S FACE: kimanifarms.jpg ships IN the bundle
+  // (farmline-app/src/assets/images/), so the farm doc carries the RELATIVE
+  // path — every img binding in the app resolves it, and no base64 bloats
+  // the reads. The seed finds it beside the app checkout on the droplet.
   let photo = '';
   try {
-    const p = require('path').join(__dirname, '..', '..', 'farmline-app', 'src', 'assets', 'images', 'kimani.jpg');
-    if (require('fs').existsSync(p)) {
-      photo = 'data:image/jpeg;base64,' + require('fs').readFileSync(p).toString('base64');
-      console.log('  photo: kimani.jpg found — the demo farm wears it');
+    const dir = require('path').join(__dirname, '..', '..', 'farmline-app', 'src', 'assets', 'images');
+    for (const name of ['kimanifarms.jpg', 'kimani.jpg']) {
+      if (require('fs').existsSync(require('path').join(dir, name))) {
+        photo = 'assets/images/' + name;
+        console.log('  photo: ' + name + ' — the demo farm wears it (bundle path)');
+        break;
+      }
     }
   } catch { /* no photo yet — the demo still works */ }
-  console.log('  previous demo replaced');
-  }
 
   // ── the farm ────────────────────────────────────────────────────────────────
   const farm = await Farm.create({
