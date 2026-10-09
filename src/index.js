@@ -152,6 +152,7 @@ api.get('/health', (_req, res) => res.json(healthPayload()));
 // AUTH — two principals
 // ──────────────────────────────────────────────────────────────────────────────
 api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
+  fl_recordVisit(req, 'register');
   const { phone, pin, name = '', farmName = '', area = '' } = req.body || {};
   if (!phone || !pin) return bad(res, 400, 'phone and pin are required');
   if (String(pin).length < 4) return bad(res, 400, 'pin must be at least 4 digits');
@@ -174,6 +175,7 @@ api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
 }));
 
 api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
+  fl_recordVisit(req, 'login');
   const { phone, pin } = req.body || {};
   const member = await Member.findOne({ phone: String(phone || ''), active: true });
   if (!member || !auth.checkPin(pin, member.pinSalt, member.pinHash)) return bad(res, 401, 'wrong number or PIN');
@@ -190,7 +192,28 @@ api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
 // on the wire — the farm holds only fictional, re-seedable data; the real
 // accounts are untouched (a demo token scopes to that farm, exactly like a
 // login token). Rate-limited like every mint.
+
+// ── THE VISIT LEDGER (2026-10-09, the founder's monitor: "how many people
+//    with whom I have shared it clicked on it") — the auth endpoints record
+//    their own visits: kind 'demo' (the Kimani entry — the click-through
+//    signal), 'register' (the conversion), 'login' (the return). The static
+//    shell is served by nginx and never reaches this process; the zyppar's
+//    monitor parses that log separately and reads this collection.
+function fl_recordVisit(req, kind) {
+  try {
+    const c = conn.db.collection('visits');
+    c.insertOne({
+      at: new Date(), kind,
+      ip: String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().slice(0, 64),
+      ua: String(req.headers['user-agent'] || '').slice(0, 180),
+      ref: String(req.headers.referer || '').slice(0, 240),
+    }).catch(() => { /* the ledger never blocks an auth flow */ });
+  } catch { /* never blocks */ }
+}
+
 api.post('/auth/demo', auth.mintRateLimit, wrap(async (req, res) => {
+  fl_recordVisit(req, 'demo');
+  fl_recordVisit(req, "demo");
   const farm = await Farm.findOne({ isDemo: true });
   if (!farm) return bad(res, 404, 'the demo farm is not seeded yet');
   const member = await Member.findOne({ farmId: farm._id, role: 'owner', active: true });
@@ -204,6 +227,7 @@ api.post('/auth/demo', auth.mintRateLimit, wrap(async (req, res) => {
 }));
 
 api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
+  fl_recordVisit(req, 'customer');
   const { phone, name = '', slug = '' } = req.body || {};
   if (!phone) return bad(res, 400, 'phone is required');
   let customer = await Customer.findOne({ phone: String(phone) });

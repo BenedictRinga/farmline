@@ -1,0 +1,1 @@
+THE FARMLINE WIRE lane 1 (the founder: how many people clicked): the visit ledger - fl_recordVisit() records every auth-door event into a visits collection (the demo mint = the Kimani click-through, the farmer register = the conversion, the login = the return, the customer mint) with at/ip/ua/ref - fire-and-forget, never blocks an auth flow; wired through the module conn handle
