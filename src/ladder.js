@@ -259,7 +259,7 @@ function landing(rungId, lang = 'en') {
     question: r.question[lang],
     free: r.free,
     priceKES: r.priceKES,
-    priceLabel: r.free ? term('free', lang) : `KES ${r.priceKES.toLocaleString()}/month`,
+    priceLabel: r.free ? term('free', lang) : `ZU ${r.priceKES.toLocaleString()}/month`,
     whatYouGet: r.gets[lang] || r.gets.en,
     whatYouGive: r.gives[lang] || r.gives.en,
     commitment: r.commitment[lang],

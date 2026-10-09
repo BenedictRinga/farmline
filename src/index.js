@@ -85,6 +85,33 @@ const shapeMessage = (m) => ({
 // HEALTH / VERSION
 // ──────────────────────────────────────────────────────────────────────────────
 app.get(['/health', config.basePath + '/health'], (_req, res) => res.json(healthPayload()));
+// ── THE DYNAMIC SITEMAP (2026-10-09, the founder's aggressive visibility:
+// "optimize for visibility, and potentially qualify for PlayStore… find
+// every trick to push farmline onto the timelines of AI and search bots") —
+// every farm's shop front is a crawlable page. The sitemap lists the app and
+// every farm with a slug. Public, no auth, XML.
+app.get('/api/farmline/sitemap.xml', async (req, res) => {
+  try {
+    const farms = await Farm.find({}, { slug: 1, name: 1, updatedAt: 1 }).sort({ updatedAt: -1 }).limit(500).lean();
+    const base = 'https://zyppar.com';
+    const today = new Date().toISOString().slice(0, 10);
+    const urls = [
+      '  <url><loc>' + base + '/farmline/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>',
+      '  <url><loc>' + base + '/farmline/#/guide</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>',
+    ];
+    for (const f of farms) {
+      if (!f.slug) continue;
+      const lastmod = f.updatedAt ? new Date(f.updatedAt).toISOString().slice(0, 10) : today;
+      urls.push('  <url><loc>' + base + '/farmline/#/s/' + f.slug + '</loc><lastmod>' + lastmod + '</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>');
+    }
+    const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls.join('\n') + '\n</urlset>';
+    res.set('Content-Type', 'application/xml');
+    res.set('Cache-Control', 'public, max-age=600');
+    return res.status(200).send(xml);
+  } catch (e) {
+    return res.status(500).send('sitemap failed');
+  }
+});
 app.get('/api/farmline/version', (_req, res) => {
   const b = Number(require('../package.json').build) || 0;
   res.json({
