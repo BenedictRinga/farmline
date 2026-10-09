@@ -64,12 +64,16 @@ git reset --hard
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
-# THE COUNTER LAW (2026-10-09, the founder: stuck on v0.1.41 for 5 deploys):
-# the build number climbs on EVERY deploy - max(package.json, commit count)+1 -
-# so the update check on every installed client sees a higher number and acts.
-COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
-node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.build=Math.max(Number(p.build)||0,Number(process.argv[1])||0)+1;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+String.fromCharCode(10));console.log('  build counter -> '+p.build)" "$COMMITS"
 
+# THE COUNTER LAW (SHELL FORM, 2026-10-09): the build number climbs on EVERY
+# deploy — max(package.json, commit count)+1 — with NO node dependency (the
+# sudo PATH lacks the nvm node; the first form failed silently).
+CUR_BUILD=$(grep -oE '"build":[ ]*[0-9]+' package.json | grep -oE '[0-9]+' | head -1)
+CUR_BUILD=${CUR_BUILD:-0}
+COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+NEW_BUILD=$(( CUR_BUILD > COMMITS ? CUR_BUILD : COMMITS + 1 ))
+sed -i "s/\"build\":[ ]*[0-9]*/\"build\": $NEW_BUILD/" package.json
+echo "  build counter -> $NEW_BUILD"
 echo "3/7  installing (yarn only)…"
 if [ -f yarn.lock ]; then
   yarn install --frozen-lockfile

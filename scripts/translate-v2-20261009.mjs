@@ -4,7 +4,12 @@
 import fs from 'fs';
 const KEY = process.env.OPENROUTER_API_KEY;
 if (!KEY) { console.error('no OPENROUTER_API_KEY'); process.exit(1); }
-const MODEL = process.env.FARMLINE_TRANSLATE_MODEL || 'z-ai/glm-4.6';
+const PROVIDER = (process.env.FARMLINE_TRANSLATE_PROVIDER || 'deepseek').toLowerCase();
+const CFG = PROVIDER === 'openrouter'
+  ? { endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: process.env.FARMLINE_TRANSLATE_MODEL || 'z-ai/glm-4.6' }
+  : { endpoint: 'https://api.deepseek.com/chat/completions', model: process.env.FARMLINE_TRANSLATE_MODEL || 'deepseek-chat' };
+console.log('the provider:', PROVIDER, '| the model:', CFG.model);
+const MODEL = CFG.model;
 const I18N = '/opt/farmline-app/src/assets/i18n';
 const WORK = '/tmp/fl-translate';
 fs.mkdirSync(WORK, { recursive: true });
@@ -25,7 +30,7 @@ const flat = (o, pre, out) => {
 const entries = Object.entries(flat(en, '', {}));
 const batch = async (items, lang) => {
     const payload = JSON.stringify(items.map(([k, v]) => ({ k, v })));
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const r = await fetch(CFG.endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY },
         signal: AbortSignal.timeout(300000),
