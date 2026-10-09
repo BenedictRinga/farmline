@@ -280,8 +280,11 @@ function attach(httpServer) {
     // deploy hears it on its next reconnect); the announce route pushes to the
     // whole room the moment the floor moves.
     socket.join('updates');
-    const floor = updates.mandatoryFloor();
-    if (floor > 0) socket.emit('update:mandatory', { build: floor });
+    // 2026-10-09 THE LOOPKEEPER VERBATIM: no mandatory floor in the check —
+    // the announce route drives the room push. The connection-time floor emit
+    // is retired with the floor itself (the crash its removal exposed dies here).
+    const floor = 0;
+    if (floor > 0) socket.emit('update:mandatory', { build: floor }); // inert
 
     socket.on('chat:join', async (data) => {
       const conv = await canAccess(data?.conversationId, me);
