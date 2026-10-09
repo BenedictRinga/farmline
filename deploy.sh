@@ -64,6 +64,12 @@ git reset --hard
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
+# THE COUNTER LAW (2026-10-09, the founder: stuck on v0.1.41 for 5 deploys):
+# the build number climbs on EVERY deploy - max(package.json, commit count)+1 -
+# so the update check on every installed client sees a higher number and acts.
+COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.build=Math.max(Number(p.build)||0,Number(process.argv[1])||0)+1;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+String.fromCharCode(10));console.log('  build counter -> '+p.build)" "$COMMITS"
+
 echo "3/7  installing (yarn only)…"
 if [ -f yarn.lock ]; then
   yarn install --frozen-lockfile
