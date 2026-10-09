@@ -1,29 +1,22 @@
-// src/updates.js — THE UPDATES CHECK (build 18).
+// src/updates.js — THE UPDATES CHECK, VERBATIM LOOPKEEPER (2026-10-09, the
+// founder: "No need for invention or fresh logic. LoopKeeper works. Just do it
+// and stop tampering with it… Every aspect, backend behavior/setup, should just
+// be cloned").
 //
-// CLONED from LoopKeeper's ZYPPAR-STYLE update service (rolodex-server
-// src/services/updates.service.js + controllers/updates.controller.js), adapted
-// to farmline's ONE truth: the build counter. LoopKeeper composes 0.3.<build>
-// from package.json and compares version strings; farmline's app already stamps
-// its build into the bundle (write-build.cjs) and guards on it at boot, so the
-// check compares BUILDS directly — no normalization needed, no version.txt
-// (that file was LoopKeeper's stale past, and it is not imported here).
-//
-// THE SHAPE THE APP READS:
-//   GET /api/farmline/updates/check?clientBuild=17
-//     → { version, build, isUpdateAvailable, mandatory, type, at }
-//   · isUpdateAvailable — the server build has moved past the client's.
-//   · mandatory         — the founder's beta lever: env FARMLINE_MANDATORY_BUILD
-//                         sets a floor; any client below it MUST update.
-//   · type              — 'immediate' when mandatory, 'flexible' otherwise
-//                         (the LoopKeeper split, carried over).
-//
-// THE BETA FORCE LAW (founder, 2026-10-06): the app never SILENTLY reloads on
-// this answer — it shows the "Important Update" surface and the user taps.
-// A thrown update that looked like nothing happened is the regression this
-// shape exists to prevent (the zyppar lesson, carried in the AGENTS doctrine).
+// THE ACTUAL LOOPKEEPER SHAPE (rolodex-server src/services/updates.service.js,
+// the build-94 "version that ticks" law):
+//   · the SERVER composes `0.1.<serverBuild>` from its own package.json build —
+//     the counter law (deploy.sh, the shell form) climbs that build on every
+//     deploy, so the advertised version ticks automatically;
+//   · the CLIENT sends its STORED version (written only when an update is
+//     APPLIED) — never the bundle's stamp — so a stale client reports its true
+//     old version and is told the truth instantly, whatever the stamps do;
+//   · the server answers { version, type }: invalid client → immediate; the
+//     major moved → immediate; otherwise flexible.
+// No version.txt, no mandatory floor in the check — the LoopKeeper composition
+// exactly, farmline-prefixed.
 const fs = require('fs');
 const path = require('path');
-const config = require('./config');
 
 const UPDATE_CHECK_HEADERS = {
   'Cache-Control': 'no-store, no-cache, must-revalidate, private',
@@ -31,58 +24,43 @@ const UPDATE_CHECK_HEADERS = {
   'Expires': '0',
 };
 
-// THE ONE TRUTH FOR "IS A NEWER APP BUILD SERVED": the STATIC BUNDLE's own
-// stamp — /var/www/farmline/build.json on the droplet (written by the app's
-// write-build.cjs at every deploy). The SERVER's package.json build is a
-// DIFFERENT counter (it counts server releases); comparing it against the
-// app's stamp meant `19 > 24` was false forever — every client was told "up
-// to date" while the served bundle moved on (the founder's 2026-10-07 report:
-// the manual check was "an illusion", stuck at 0.1.3). Resolution order: the
-// env override → the served bundle → the sibling checkout (the dev machine) →
-// the server's own package.json (last resort; never the truth on a droplet).
-function serverBuild() {
-  const candidates = [];
-  if (process.env.FARMLINE_SERVED_BUNDLE) {
-    candidates.push(path.join(process.env.FARMLINE_SERVED_BUNDLE, 'build.json'));
-  }
-  candidates.push('/var/www/farmline/build.json');
-  candidates.push(path.resolve(process.cwd(), '..', 'farmline-app', 'www', 'build.json'));
-  for (const p of candidates) {
-    try {
-      const stamp = JSON.parse(fs.readFileSync(p, 'utf8'));
-      const n = Number(stamp.build);
-      if (Number.isFinite(n) && n > 0) return n;
-    } catch { /* next candidate — a missing file is not an error to log */ }
-  }
+function normalizeVersion(version) {
+  if (!version) return undefined;
+  const m = String(version).match(/\d+\.\d+\.\d+/);
+  return m ? m[0] : undefined;
+}
+
+/** The LoopKeeper build-94 compose: 0.1.<serverBuild> from this repo's package.json. */
+async function serverVersion() {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'));
-    return Number(pkg.build) || 0;
-  } catch { return 0; }
+    const pkg = JSON.parse(await fs.promises.readFile(path.resolve(process.cwd(), 'package.json'), 'utf8'));
+    return `0.1.${Number(pkg.build) || 0}`;
+  } catch { return '0.1.0'; }
 }
 
-function mandatoryFloor() {
-  const n = Number(process.env.FARMLINE_MANDATORY_BUILD);
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
+/** The check, verbatim LoopKeeper: clientVersion is the client's STORED version. */
+async function getUpdateStatus(clientVersion) {
+  const current = await serverVersion();
+  const normalizedClientVersion = normalizeVersion(clientVersion);
+  const normalizedCurrentVersion = normalizeVersion(current);
 
-/** The check, as the controller serves it. clientBuild is the app's own stamp. */
-function getUpdateStatus(clientBuild) {
-  const build = serverBuild();
-  const floor = mandatoryFloor();
-  const cb = Number(clientBuild);
-  const client = Number.isFinite(cb) && cb > 0 ? cb : null;
-  const isUpdateAvailable = client === null ? true : build > client;
-  const mandatory = client === null ? true : client < floor;
+  // Invalid client version -> force an update (LoopKeeper's rule).
+  if (!normalizedClientVersion) {
+    return {
+      version: normalizedCurrentVersion || current,
+      type: 'immediate',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  const isMajorUpdate =
+    normalizedClientVersion.split('.')[0] !== normalizedCurrentVersion?.split('.')[0];
+
   return {
-    version: '0.1.' + build,
-    build,
-    isUpdateAvailable,
-    mandatory,
-    mandatoryBuild: floor,
-    type: mandatory ? 'immediate' : 'flexible',
-    env: config.envName,
-    at: new Date().toISOString(),
+    version: normalizedCurrentVersion || current,
+    type: isMajorUpdate ? 'immediate' : 'flexible',
+    timestamp: new Date().toISOString(),
   };
 }
 
-module.exports = { getUpdateStatus, UPDATE_CHECK_HEADERS, serverBuild, mandatoryFloor };
+module.exports = { getUpdateStatus, UPDATE_CHECK_HEADERS };

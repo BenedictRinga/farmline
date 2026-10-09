@@ -134,9 +134,9 @@ app.get('/api/farmline/version', (_req, res) => {
 // (routes/updates.routes.js + controllers/updates.controller.js): same no-store
 // headers (a cached check answer is a lie), same query shape, farmline's build
 // counter as the truth. PUBLIC — the check must work before any sign-in.
-app.get('/api/farmline/updates/check', (req, res) => {
+app.get('/api/farmline/updates/check', async (req, res) => {
   res.set(updates.UPDATE_CHECK_HEADERS);
-  res.json(updates.getUpdateStatus(req.query.clientBuild));
+  res.json(await updates.getUpdateStatus(req.query.clientVersion));
 });
 
 // ── B2 — THE ANNOUNCE DOOR (the socket is the accelerator) ───────────────────
