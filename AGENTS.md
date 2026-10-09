@@ -332,3 +332,23 @@ Local dev runs on **port 4600** (4200 and 4400 are taken by other projects).
 4. **Deploys that "legitimately" carry nginx config** (deploy.sh, the guarantee
    package) still fall under this rule: they announce the diff in their output
    and the founder pre-approves the script — no silent inserts.
+
+
+## ⚓ THE WATCH LAW (2026-10-09, the collapse audit — the founder: "it has a fundamental problem or two")
+
+1. **The health watch is LOAD-BEARING.** The root crontab carries one line:
+   `* * * * * curl -sf -m 5 http://127.0.0.1:4600/health || sudo -u appuser pm2 resurrect`
+   It proves SERVING (the health answer), not process-list presence. On
+   2026-10-08 00:52:40 a deploy stopped farmline-server and never started it;
+   with the watch gone from the crontab the app stayed dead 29 minutes
+   (00:52→01:21 — the pm2.log evidence). The watch would have revived it in
+   under a minute.
+2. **No deploy may `pm2 delete farmline-server`.** The deploys use
+   `pm2 restart farmline-server` (or start-if-missing + resurrect). A failed
+   start inside a deploy MUST end with a resurrect, never a silent exit.
+3. **No script may touch the root crontab.** The watch's line is written once
+   and verified at every session; its disappearance was the second collapse
+   enabler. Any tooling that rewrites crontabs is a bug.
+4. **The boot-seed's cwd is the repo root** (the 2026-10-09 fix: cwd:
+   __dirname is src/, which made the demo-seed resolve a nonexistent path and
+   crash on every boot — the demo never re-seeded on boot).
