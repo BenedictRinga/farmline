@@ -8,6 +8,19 @@
 # regresses the droplet.
 set -euo pipefail
 
+# THE RE-EXEC GUARD (2026-10-09, the twin of the app's fix): step 2's
+# `git reset --hard` rewrites THIS SCRIPT while bash is executing it — bash
+# reads lazily from the file's byte offset, so after the reset it can continue
+# into older script text. A deploy script that the reset will replace must not
+# run from that file: it copies itself to /tmp and execs the copy.
+if [ "${FL_DEPLOY_REEXEC:-}" != "1" ]; then
+  TMP_SELF="/tmp/farmline-deploy-server.$$.sh"
+  cp "$0" "$TMP_SELF"
+  chmod +x "$TMP_SELF"
+  FL_DEPLOY_REEXEC=1 exec bash "$TMP_SELF" "$@"
+fi
+rm -f "$0" 2>/dev/null || true
+
 DEPLOY_DIR="${FARMLINE_DEPLOY_DIR:-/opt/farmline-server}"
 PM2_NAME="farmline-server"
 # THE DAEMON LAW (the trusted session's finding, 2026-10-07): farmline-server
