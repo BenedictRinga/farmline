@@ -1,0 +1,1 @@
+THE EXEC BIT LAW (the founder: permission denied again on deploy-app.sh): the deploy git reset restores the script from the repo - the repo stored it mode 100644, so every reset re-stripped the exec bit the manual chmod added; git update-index --chmod=+x puts 755 in the repo itself - every future reset preserves it
