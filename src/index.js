@@ -46,6 +46,7 @@ const schedule = require('./schedule');
 const projection = require('./projection');
 const reversal = require('./reversal');
 const protocols = require('./protocols');
+const stages = require('./stages');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
   ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation,
@@ -432,6 +433,94 @@ api.post('/farm/:farmId/vision', auth.requireAuth('farmer'), auth.requireFarmSco
   }
 }));
 
+// ── THE VISION STAGE PROPOSAL (Door 2 of the mid-season door, 2026-10-09) ─────
+// The farmer photographs the crop; the model proposes crop + growth stage; ONE
+// confirm tap in the app turns that into Door 1's back-calculation. The AI
+// proposes; the farmer confirms; nothing writes without the tap (the
+// capture-honesty law) — this route only READS the photo and returns a proposal.
+// Same entitlement gate as the free-text vision route; the demo farm carries
+// visionTier 'advanced' so a visitor can walk this door too.
+api.post('/farm/:farmId/vision/stage', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const farm = await Farm.findById(req.params.farmId).lean();
+  if (!farm) return bad(res, 404, 'farm not found');
+  if (farm.visionTier !== 'advanced') {
+    return bad(res, 403, 'AI Vision is part of the Advanced package');
+  }
+  const photo = String(req.body?.photo || '');
+  if (!photo.startsWith('data:image/')) return bad(res, 400, 'send a photo of the crop');
+  if (photo.length > 1200000) return bad(res, 400, 'the photo is too large — pick a smaller one');
+
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return bad(res, 503, 'AI Vision is not armed on this server');
+  const model = process.env.FARMLINE_VISION_MODEL || 'z-ai/glm-4.5v';
+  const system = [
+    'You identify field crops and their growth stage for smallholder farms in Kenya and East Africa.',
+    'Answer ONLY with compact JSON, no prose around it:',
+    '{"crop":"<the crop name, common English, lowercase>","weeksFromPlanting":<integer weeks since planting or sowing, 0-120>,"note":"<one short phrase describing the crops current look, e.g. about knee-high>","confidence":"high"|"medium"|"low"}',
+    'If the photo shows no crop, answer {"crop":"","weeksFromPlanting":-1,"note":"no crop visible","confidence":"low"}.',
+    'Judge the stage from what you see: height, leaf count, flowering, fruiting, drying.',
+  ].join(' ');
+
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(60000),
+      body: JSON.stringify({
+        model,
+        max_tokens: 300,
+        temperature: 0.1,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: [
+            { type: 'text', text: 'Which crop is this and how long ago was it planted?' },
+            { type: 'image_url', image_url: { url: photo } },
+          ] },
+        ],
+      }),
+    });
+    const j = await r.json().catch(() => null);
+    const text = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+    if (!r.ok || !text) {
+      console.warn('[farmline] vision/stage:', r.status, JSON.stringify(j).slice(0, 200));
+      return bad(res, 502, 'the vision service did not answer — try again');
+    }
+    // THE DEFENSIVE PARSE: the model answers JSON; a wrapped or chatty answer is
+    // salvaged by taking the first {...} block. Anything else is an honest 502.
+    const m = String(text).match(/\{[\s\S]*\}/);
+    let p = null;
+    try { p = m ? JSON.parse(m[0]) : null; } catch { p = null; }
+    if (!p || typeof p !== 'object') {
+      return bad(res, 502, 'the vision answer could not be read — try again, or pick the stage yourself');
+    }
+    const cropRaw = String(p.crop || '').trim().toLowerCase();
+    const weeks = Number(p.weeksFromPlanting);
+    const note = String(p.note || '').trim().slice(0, 120);
+    const confidence = ['high', 'medium', 'low'].includes(String(p.confidence)) ? String(p.confidence) : 'medium';
+    if (!cropRaw || !Number.isFinite(weeks) || weeks < 0) {
+      return ok(res, { proposal: { crop: '', cropKey: '', note, confidence, band: null, weeksFromPlanting: null } });
+    }
+    // The model's name must land on a species farmline serves — direct key match
+    // first, then the label-guesser (corn→maize, maize|mahindi→maize…). No match
+    // is an honest empty crop; the app falls back to the picker list.
+    const known = protocols.speciesList().includes(cropRaw) ? cropRaw : schedule.guessSpecies(cropRaw);
+    const cropKey = known && protocols.speciesList().includes(known) ? known : '';
+    if (!cropKey) {
+      return ok(res, { proposal: { crop: cropRaw, cropKey: '', note, confidence, band: null, weeksFromPlanting: Math.max(0, Math.round(weeks)) } });
+    }
+    const band = stages.resolveStage(cropKey, Math.round(weeks) * 7);
+    return ok(res, {
+      proposal: {
+        crop: cropRaw, cropKey, note, confidence, band,
+        weeksFromPlanting: Math.max(0, Math.round(weeks)),
+      },
+    });
+  } catch (e) {
+    console.warn('[farmline] vision/stage error:', e.message);
+    return bad(res, 502, 'the vision service did not answer — try again');
+  }
+}));
+
 // ══════════════════════════════════════════════════════════════════════════════
 // FARMER — setup
 // ──────────────────────────────────────────────────────────────────────────────
@@ -490,18 +579,100 @@ api.post('/farm/:farmId/groups', auth.requireAuth('farmer'), auth.requireFarmSco
   return ok(res, { group, scheduled: built.created });
 }));
 
+// ── THE MID-SEASON DOOR — the stage table, served (2026-10-09) ────────────────
+// Door 1's picker data: every crop's LOOK bands, derived from its OWN cycle data
+// (src/stages.js — the boundaries are the crop's protocol day-offsets; the
+// look-words are generic phases placed by fraction of cycle). A crop with no
+// planting-anchored schedule is absent here, and the app degrades that crop to
+// Door 3 with an honest note — never a dead end.
+api.get('/meta/crop-stages', auth.requireAuth('farmer'), wrap(async (_req, res) => {
+  return ok(res, { crops: stages.stageTableAll() });
+}));
+
+// THE PREVIEW — what a mid-season entry WOULD set, computed by the one pure
+// function, before anything writes. The confirm tap gates the write; this is
+// what the tap confirms. Read-only: no document is created here.
+api.post('/farm/:farmId/crops/preview', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const { crop, stageKey, within = 'mid' } = req.body || {};
+  if (!crop) return bad(res, 400, 'crop required');
+  const table = stages.stageTable(String(crop));
+  if (!table) return bad(res, 400, 'this crop has no stage table yet — start from today instead');
+  const calc = stages.backCalculate(String(crop), String(stageKey || ''), String(within || 'mid'));
+  if (!calc) return bad(res, 400, 'pick the stage from the list — that one is not in this crop’s cycle');
+  const preview = stages.previewFor(String(crop), calc.plantedOn);
+  return ok(res, {
+    crop, stageKey: calc.stageKey, within: calc.within, band: calc.band,
+    plantedOn: calc.plantedOn, weeksAgo: calc.weeksAgo,
+    estimatedPast: (preview?.estimatedPast || []).map((e) => ({
+      intervention: e.intervention, en: e.en, dueOn: e.dueOn, windowDays: e.windowDays,
+    })),
+    upcoming: (preview?.upcoming || []).map((e) => ({ intervention: e.intervention, en: e.en, dueOn: e.dueOn })),
+    baselines: preview?.baselines || 0,
+  });
+}));
+
 api.post('/farm/:farmId/crops', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const { plotId = null, crop, variety = '', acres = 0, season = '', plantedOn = null, fodderFor = '' } = req.body || {};
   if (!crop) return bad(res, 400, 'crop required');
+  // THE DEMO WEARS ITS OWN FIELDS (the photo-guard pattern, 2026-10-09): the
+  // mid-season door is a NEW WRITE SURFACE, and Kimani Farms is shared by every
+  // visitor — a visitor's entry would plant a crop into the fiction. The demo
+  // stays read-only here and says so. (Pre-existing note for the magister: the
+  // plots and groups routes predate the demo and carry no guard — flagged in the
+  // thread report, not silently changed here.)
+  const _demoFarm = await Farm.findById(req.params.farmId).select('isDemo').lean();
+  if (_demoFarm?.isDemo) return bad(res, 403, 'In the demo this stays read-only — on your farm, this writes.');
+  const entry = String(req.body?.entry || 'planting');
+
+  // ── THE THREE ENTRIES (the mid-season door, 2026-10-09) ──
+  // 'planting'  — the classic path: the farmer knows the date (unchanged behavior).
+  // 'midseason' — Door 1/2: the farmer picked the crop's current STAGE; the planting
+  //               date is BACK-CALCULATED by the one pure function and stamped as an
+  //               estimate. Past events materialise as confirmation-due estimates.
+  // 'today'     — Door 3: the farmer knows nothing about the past; plantedOn stays
+  //               NULL (nothing is invented), the remaining schedule anchors today.
+  let anchor = null;
+  let plantedEstimated = false;
+  let cycleStart = null;
+  let status = 'planned';
+  if (entry === 'midseason') {
+    const table = stages.stageTable(String(crop));
+    if (!table) return bad(res, 400, 'this crop has no stage table yet — start from today instead');
+    const calc = stages.backCalculate(String(crop), String(req.body?.stageKey || ''), String(req.body?.within || 'mid'));
+    if (!calc) return bad(res, 400, 'pick the stage from the list — that one is not in this crop’s cycle');
+    anchor = calc.plantedOn;
+    plantedEstimated = true;
+    status = 'growing';
+  } else if (entry === 'today') {
+    cycleStart = new Date();
+    anchor = cycleStart;
+    status = 'growing';
+  } else {
+    anchor = plantedOn ? new Date(plantedOn) : null;
+    status = anchor ? 'growing' : 'planned';
+  }
+
   const cycle = await CropCycle.create({
     farmId: req.params.farmId, plotId, crop, variety, acres, season,
-    plantedOn: plantedOn ? new Date(plantedOn) : null, fodderFor, status: plantedOn ? 'growing' : 'planned',
+    plantedOn: entry === 'today' ? null : anchor,
+    plantedOnEstimated: plantedEstimated,
+    cycleStartOn: cycleStart,
+    fodderFor, status,
   });
   const built = await schedule.materialise({
     farmId: req.params.farmId, subjectType: 'cropcycle', subjectId: cycle._id,
-    subjectLabel: crop, species: crop, anchor: cycle.plantedOn || new Date(),
+    subjectLabel: crop, species: crop,
+    anchor: cycle.plantedOn || cycle.cycleStartOn || new Date(),
+    markPastAsEstimated: entry === 'midseason',
+    futureOnly: entry === 'today',
   });
-  return ok(res, { cycle, scheduled: built.created });
+  // The response says what the door did, so the toast can say it honestly.
+  const estCount = await ScheduledEvent.countDocuments({ farmId: req.params.farmId, subjectId: cycle._id, status: 'estimated' });
+  return ok(res, {
+    cycle, scheduled: built.created,
+    entry, estimated: estCount,
+    plantedOn: cycle.plantedOn, calendarFrom: cycle.cycleStartOn,
+  });
 }));
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -521,7 +692,7 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
   const farmId = req.params.farmId;
   const now = new Date();
 
-  const [farmDoc, plots, cycles, groups, animals, openEvents, holds] = await Promise.all([
+  const [farmDoc, plots, cycles, groups, animals, openEvents, estimatedEvents, holds] = await Promise.all([
     // The header needs the farm's IDENTITY, not just its name — this is the screen
     // that has to feel like the farmer's own place. Photography is the strongest trust
     // signal we have (framework §1.8), so the photos come with it.
@@ -532,9 +703,14 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
     AnimalGroup.find({ farmId, active: true, archivedAt: null }).sort({ species: 1 }).lean(),
     Animal.find({ farmId, status: { $ne: 'sold' } }).lean(),
     // Only what is still outstanding. Completed and abandoned history is Layer 2+.
+    // Estimated events ride a SEPARATE query — a back-calculated past step is a
+    // question, never the crop's "next due" work.
     ScheduledEvent.find({ farmId, status: { $in: ['due', 'carried'] } })
       .select('subjectType subjectId subjectLabel intervention dueOn baseline withdrawal')
       .lean(),
+    ScheduledEvent.find({ farmId, status: 'estimated' })
+      .select('subjectId intervention dueOn windowDays')
+      .sort({ dueOn: 1 }).lean(),
     // active: true — a LIFTED hold (its record was reversed) must not keep showing
     // on the farm screen. Until now this read only the window; the shop read
     // `active` too, so the two faces could disagree. Layer 2's record reversal
@@ -577,6 +753,15 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
   };
 
   // Crops hang off their plot, because that is how a farmer thinks about them.
+  const estBySubject = new Map();
+  for (const ev of estimatedEvents) {
+    const key = String(ev.subjectId);
+    if (!estBySubject.has(key)) estBySubject.set(key, []);
+    const inDays = Math.round((new Date(ev.dueOn) - now) / 86400000);
+    estBySubject.get(key).push({
+      id: ev._id, intervention: ev.intervention, dueOn: ev.dueOn, inDays,
+    });
+  }
   const cropsByPlot = new Map();
   const unplaced = [];
   for (const c of cycles) {
@@ -584,10 +769,16 @@ api.get('/farm/:farmId/inventory', auth.requireAuth('farmer'), auth.requireFarmS
       _id: c._id, crop: c.crop, variety: c.variety, acres: c.acres, season: c.season,
       status: c.status, plantedOn: c.plantedOn, expectedHarvest: c.expectedHarvest,
       fodderFor: c.fodderFor || '',
+      // THE MID-SEASON DOOR fields: an estimated planting date is shown as an
+      // estimate everywhere; a Door-3 crop has no planting date at all and carries
+      // the day its remaining calendar started instead.
+      plantedOnEstimated: !!c.plantedOnEstimated,
+      calendarFrom: c.cycleStartOn || null,
       daysGrowing: c.plantedOn ? Math.max(0, Math.round((now - new Date(c.plantedOn)) / 86400000)) : null,
       harvested: c.yield && c.yield.quantity
         ? { quantity: c.yield.quantity, unit: c.yield.unit, on: c.yield.harvestedOn } : null,
       next: shapeNext(c._id),
+      estimated: estBySubject.get(String(c._id)) || [],
       holds: holdsBySubject.get(String(c._id)) || [],
     };
     if (c.plotId) {
@@ -1121,6 +1312,52 @@ api.post('/farm/:farmId/events/:eventId/complete', auth.requireAuth('farmer'), a
   const holds = await projection.activeHolds(req.params.farmId);
   const availability = await projection.buildAvailability(req.params.farmId);
   return ok(res, { ...result, holds, availability });
+}));
+
+// ── THE ESTIMATED STEPS (the mid-season door's confirmation-due events) ───────
+// A mid-season entry back-calculates the planting date, and the steps that date
+// puts in the PAST are questions, not records: "already done (estimated)". Confirm
+// runs the normal completion machinery (record + hold + next occurrence) and the
+// record SAYS it was confirmed from an estimate. Dismiss deletes the event —
+// zero trace in the ledgers or the records.
+// THE DEMO GUARD (the photo-guard pattern): Kimani Farms is shared by every
+// visitor, so a visitor's confirm/dismiss would write into the fiction. The demo
+// stays read-only here, and says so.
+function demoGuard(farm) {
+  return farm?.isDemo ? { ok: false, status: 403, error: 'In the demo this stays read-only — on your farm, this writes.' } : { ok: true };
+}
+
+api.post('/farm/:farmId/events/:eventId/confirm-estimated', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const farm = await Farm.findById(req.params.farmId);
+  if (!farm) return bad(res, 404, 'farm not found');
+  const g = demoGuard(farm);
+  if (!g.ok) return bad(res, g.status, g.error);
+  const ev = await ScheduledEvent.findOne({ _id: req.params.eventId, farmId: req.params.farmId }).lean();
+  if (!ev) return bad(res, 404, 'event not found');
+  if (ev.status !== 'estimated') return bad(res, 409, 'only an estimated step can be confirmed here');
+  const result = await schedule.complete({
+    farm, eventId: req.params.eventId, byMemberId: req.auth.mid || null,
+    productUsed: req.body?.productUsed || '', speciesHint: req.body?.species || '',
+    noteExtra: 'confirmed from the mid-season estimate (planting date estimated)',
+  });
+  if (!result.ok) return bad(res, 404, result.error || 'event not found');
+  const holds = await projection.activeHolds(req.params.farmId);
+  const availability = await projection.buildAvailability(req.params.farmId);
+  return ok(res, { ...result, holds, availability });
+}));
+
+api.post('/farm/:farmId/events/:eventId/dismiss-estimated', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const farm = await Farm.findById(req.params.farmId).select('isDemo').lean();
+  if (!farm) return bad(res, 404, 'farm not found');
+  const g = demoGuard(farm);
+  if (!g.ok) return bad(res, g.status, g.error);
+  // ZERO TRACE: the document is removed, not flagged. No Log, no Hold, no
+  // record of any kind was ever written for a dismissed estimate, and now the
+  // question itself is gone too. materialise() will not resurrect it unless the
+  // planting anchor itself changes — and then it is a new estimate, honestly made.
+  const out = await ScheduledEvent.findOneAndDelete({ _id: req.params.eventId, farmId: req.params.farmId, status: 'estimated' });
+  if (!out) return bad(res, 404, 'event not found — it may already be dismissed');
+  return ok(res, { dismissed: true });
 }));
 
 api.get('/farm/:farmId/holds', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {

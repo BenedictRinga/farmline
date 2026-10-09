@@ -22,10 +22,26 @@ function addDays(date, n) { return new Date(new Date(date).getTime() + n * DAY);
  * Materialise the schedule for a subject from its species protocols.
  * `anchor` is the date the clock starts from (birth, planting, or now).
  * Idempotent per (subject, protocol): re-running will not duplicate a pending event.
+ *
+ * THE MID-SEASON DOOR (2026-10-09) adds two modes, both honesty switches:
+ *   markPastAsEstimated — the anchor was BACK-CALCULATED (Door 1: the farmer picked
+ *     the crop's current stage; the planting date is an estimate). Events whose date
+ *     falls in the PAST are created as status 'estimated' + estimated:true — questions
+ *     ("already done?"), never records. The farmer confirms each (the normal
+ *     completion path) or dismisses it (deleted, zero trace). Interval protocols
+ *     with no history still ask their baseline question, but TODAY, not at a
+ *     fabricated past date.
+ *   futureOnly — Door 3 ("just start from today"): only the work still ahead is
+ *     created. Nothing about the past is invented, not even as a question.
+ * A date exactly today is not the past: it stays ordinary work.
  */
-async function materialise({ farmId, subjectType, subjectId, subjectLabel, species, anchor = new Date(), fromLast = {} }) {
+async function materialise({
+  farmId, subjectType, subjectId, subjectLabel, species,
+  anchor = new Date(), fromLast = {}, markPastAsEstimated = false, futureOnly = false,
+}) {
   const protos = forSpecies(species);
   const created = [];
+  const now = new Date();
 
   for (const p of protos) {
     const t = p.trigger || {};
@@ -46,7 +62,9 @@ async function materialise({ farmId, subjectType, subjectId, subjectLabel, speci
         // NO KNOWN HISTORY. Do not invent a date and do not bury it two weeks out.
         // Surface it once, now, flagged as a baseline to confirm — that is the
         // honest answer, and establishing the baseline IS the first day's work.
-        dueOn = new Date(anchor);
+        // A mid-season anchor (in the past) must not date the question into the
+        // past either: the baseline question belongs to today.
+        dueOn = markPastAsEstimated || futureOnly ? new Date(now) : new Date(anchor);
         isBaseline = true;
       }
     } else if (t.type === 'season') {
@@ -54,11 +72,16 @@ async function materialise({ farmId, subjectType, subjectId, subjectLabel, speci
     }
     if (!dueOn || Number.isNaN(dueOn.getTime())) continue;
 
+    const inPast = dueOn.getTime() < now.getTime();
+    if (futureOnly && inPast && !isBaseline) continue;   // Door 3: the past is never written, not even as a question
+    if (futureOnly && inPast && isBaseline) continue;
+
     const exists = await ScheduledEvent.findOne({
       farmId, subjectType, subjectId, intervention: p.id, status: { $in: ['due', 'carried'] },
     }).lean();
     if (exists) continue;
 
+    const estimated = markPastAsEstimated && inPast && !isBaseline;
     created.push({
       farmId, subjectType, subjectId, subjectLabel,
       intervention: p.id,
@@ -67,8 +90,9 @@ async function materialise({ farmId, subjectType, subjectId, subjectLabel, speci
       doseBasis: p.doseBasis || '',
       costEstimate: p.costEstimate || 0,
       withdrawal: p.withdrawal || { milkDays: 0, meatDays: 0 },
-      status: 'due',
+      status: estimated ? 'estimated' : 'due',
       baseline: isBaseline,
+      estimated,
     });
   }
 
@@ -130,7 +154,7 @@ function findProtocol(species, intervention) {
  *   4. schedules the next occurrence for interval protocols
  *   5. stamps the farm's confidence clock
  */
-async function complete({ farm, eventId, byMemberId = null, productUsed = '', speciesHint = '' }) {
+async function complete({ farm, eventId, byMemberId = null, productUsed = '', speciesHint = '', noteExtra = '' }) {
   const ev = await ScheduledEvent.findOne({ _id: eventId, farmId: farm._id });
   if (!ev) return { ok: false, error: 'not found' };
 
@@ -168,7 +192,7 @@ async function complete({ farm, eventId, byMemberId = null, productUsed = '', sp
     subjectId: ev.subjectId,
     subjectLabel: ev.subjectLabel,
     product: productUsed || ev.intervention,
-    note: `from the schedule: ${proto?.en || ev.intervention}`,
+    note: `from the schedule: ${proto?.en || ev.intervention}${noteExtra ? ` — ${noteExtra}` : ''}`,
     scheduledEventId: ev._id,
   });
 

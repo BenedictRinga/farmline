@@ -13,6 +13,7 @@ const BASE = ROOT + '/api/farmline';
 let fail = 0;
 const ok = (m) => console.log('  PASS  ' + m);
 const bad = (m) => { fail++; console.log('  FAIL  ' + m); };
+const assert = (c, m) => (c ? ok(m) : bad(m));
 
 async function call(method, path, body, token) {
   const r = await fetch(BASE + path, {
@@ -74,8 +75,18 @@ function need(label, obj, fields) {
   // A2 tranche 4 — THE UPDATES CHECK (public, no-store): the app reads this on
   // boot, on every visibility return and every 5 minutes while visible; the
   // contract pins the exact shape, because a cached or partial answer is a lie.
-  const upd = await call('GET', `/updates/check?clientBuild=1`);
-  need('GET /updates/check (no auth)', upd.body, ['version', 'build', 'isUpdateAvailable', 'mandatory', 'mandatoryBuild', 'type']);
+  // RE-ALIGNED 2026-10-09 to the founder-ordered LoopKeeper shape (commit 6e959fa
+  // "VERBATIM LOOPKEEPER — no invention"): the answer is { version, type } — the
+  // client sends its STORED version, invalid → 'immediate', a major drift →
+  // 'immediate', else 'flexible'. The old build-counter fields (build,
+  // isUpdateAvailable, mandatory, mandatoryBuild) are RETIRED; asserting them here
+  // kept this gate red ever since that attunement landed.
+  const updNoClient = await call('GET', `/updates/check`);
+  need('GET /updates/check (no auth, no client version)', updNoClient.body, ['version', 'type']);
+  assert(updNoClient.body?.type === 'immediate', 'an invalid/absent client version is told IMMEDIATE (the honest clock)');
+  const updStale = await call('GET', `/updates/check?clientVersion=0.1.0`);
+  need('GET /updates/check (stale client)', updStale.body, ['version', 'type']);
+  assert(['immediate', 'flexible'].includes(updStale.body?.type), 'the type is one of the two honest values');
 
   // Complete — the app reads holds[].affects and holds[].days for its message.
   // `holds` is ALWAYS an array; it is only non-empty when the protocol carried a

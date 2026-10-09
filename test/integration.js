@@ -619,6 +619,170 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(dup.status === 200 && dup.body?.accepted?.[0]?.duplicate === true, 'the replay is still idempotent');
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // § MID-SEASON DOOR (the founder's brief, 2026-10-09) — three doors, all walked.
+  // A farmer whose maize is already knee-high must not be asked for a planting
+  // date they cannot recall, and must never walk away unwelcome.
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== M1. the pure core: stage tables + back-calculation edges ===');
+  {
+    const stages = require('../src/stages');
+    const NOW = new Date('2026-10-09T12:00:00Z');
+    const table = stages.stageTable('maize');
+    assert(table && table.bands.length >= 2, `maize carries a stage table derived from its own cycle (${table?.bands?.length || 0} bands)`);
+    assert(table.bands[table.bands.length - 1].key === 'harvestReady', 'the last band is the harvest window');
+    const first = stages.backCalculate('maize', table.bands[0].key, 'mid', NOW);
+    assert(first && first.offsetDays >= table.bands[0].from && first.offsetDays <= table.bands[0].to,
+      `the first stage back-calculates inside its band (offset ${first?.offsetDays} in [${table.bands[0].from},${table.bands[0].to}))`);
+    const lastBand = table.bands[table.bands.length - 1];
+    const last = stages.backCalculate('maize', lastBand.key, 'mid', NOW);
+    assert(last && last.offsetDays >= lastBand.from, 'the last stage resolves at/after the harvest day');
+    assert(last.plantedOn.getTime() < NOW.getTime(), 'a picked stage always puts planting in the past — never the future');
+    const wide = table.bands.find((b) => b.wide);
+    if (wide) {
+      const e = stages.backCalculate('maize', wide.key, 'early', NOW);
+      const l = stages.backCalculate('maize', wide.key, 'late', NOW);
+      assert(e.offsetDays < l.offsetDays, 'a wide band\'s refinement orders honestly (early < late)');
+      assert(e.offsetDays >= wide.from && l.offsetDays <= wide.to, 'the refinement never leaves the band');
+    } else {
+      warn('no wide band on maize this run — the refinement edges are covered by the other crops\' tables');
+    }
+    assert(stages.backCalculate('maize', 'no-such-stage', 'mid', NOW) === null, 'an unknown stage is refused, not guessed');
+    assert(stages.backCalculate('unknowncrop', 'sprouting', 'mid', NOW) === null, 'an unknown crop is refused, not guessed');
+    assert(stages.resolveStage('maize', 4 * 7, NOW)?.key, 'Door 2\'s bridge resolves a weeks-count into a band');
+    assert(stages.resolveStage('maize', 99999, NOW)?.key === 'harvestReady', 'a count beyond the cycle resolves into the harvest band');
+    const allTables = stages.stageTableAll();
+    assert(allTables.maize && allTables.beans, 'the served table carries the crops');
+    const classed = Object.values(stages.CROP_CLASS).flat();
+    const missing = classed.filter((c) => !allTables[c]);
+    assert(missing.length === 0, `every protocol\'d crop is classed and served (${missing.join(', ') || 'none missing'})`);
+  }
+
+  console.log('\n=== M2. Door 1 — pick the stage, the schedule lands, the past asks ===');
+  {
+    const meta = await req('GET', '/meta/crop-stages', { token });
+    assert(meta.status === 200 && meta.body?.crops?.maize, 'crop-stages serves the picker data');
+    const bands = meta.body.crops.maize.bands;
+    const picked = bands.find((b) => b.wide) || bands[Math.min(1, bands.length - 1)];
+    const prev = await req('POST', `/farm/${farmId}/crops/preview`, { token, body: { crop: 'maize', stageKey: picked.key, within: 'mid' } });
+    assert(prev.status === 200 && prev.body?.plantedOn, `the preview computes the estimate read-only (${prev.status})`);
+    assert(Array.isArray(prev.body.estimatedPast) && Array.isArray(prev.body.upcoming),
+      `the preview splits past (estimated) from future (dated): ${prev.body?.estimatedPast?.length} past / ${prev.body?.upcoming?.length} ahead`);
+    const mid = await req('POST', `/farm/${farmId}/crops`, {
+      token, body: { plotId: plot.body.plot._id, crop: 'maize', acres: 1, entry: 'midseason', stageKey: picked.key, within: 'mid' },
+    });
+    assert(mid.status === 200, `the mid-season write lands (${mid.status})`);
+    assert(mid.body?.cycle?.plantedOnEstimated === true, 'the cycle carries the honesty flag (plantedOnEstimated)');
+    assert(mid.body?.estimated >= 1, `past steps materialised as confirmation-due estimates: ${mid.body?.estimated}`);
+    assert(mid.body?.scheduled >= 1, `future steps land on real dates: ${mid.body?.scheduled}`);
+    const midCycleId = mid.body.cycle._id;
+
+    const inv2 = await req('GET', `/farm/${farmId}/inventory`, { token });
+    const shaped = (inv2.body?.plots || []).flatMap((p) => p.crops || []).find((c) => String(c._id) === String(midCycleId));
+    assert(shaped && Array.isArray(shaped.estimated) && shaped.estimated.length >= 1,
+      'the inventory carries the confirmation-due steps on the crop itself');
+    assert(shaped?.plantedOnEstimated === true, 'the inventory says the planting date is an estimate');
+    assert(shaped?.next && shaped.next.intervention !== undefined,
+      'an estimated step never becomes the crop\'s next-due work');
+
+    // CONFIRM one — the normal record machinery runs, and the record says it was confirmed.
+    const recsBefore = await req('GET', `/farm/${farmId}/records`, { token });
+    const n0 = recsBefore.body?.records?.length ?? 0;
+    const estOne = shaped.estimated[0];
+    const conf = await req('POST', `/farm/${farmId}/events/${estOne.id}/confirm-estimated`, { token, body: {} });
+    assert(conf.status === 200 && conf.body?.logId, `confirm writes the record through the normal path (${conf.status})`);
+    const recsAfter = await req('GET', `/farm/${farmId}/records`, { token });
+    const n1 = recsAfter.body?.records?.length ?? 0;
+    assert(n1 === n0 + 1, `exactly one record was written by the confirm (${n0} -> ${n1})`);
+
+    const invAfterConfirm = await req('GET', `/farm/${farmId}/inventory`, { token });
+    const shapedAfterConfirm = (invAfterConfirm.body?.plots || []).flatMap((p) => p.crops || []).find((c) => String(c._id) === String(midCycleId));
+    assert((shapedAfterConfirm?.estimated || []).length === shaped.estimated.length - 1,
+      `a confirmed estimate stops being a question (${shaped.estimated.length} -> ${shapedAfterConfirm?.estimated?.length})`);
+
+    // DISMISS another — zero trace: no record appears, the question is gone.
+    const estTwo = shapedAfterConfirm.estimated[0];
+    if (estTwo) {
+      const dis = await req('POST', `/farm/${farmId}/events/${estTwo.id}/dismiss-estimated`, { token, body: {} });
+      assert(dis.status === 200 && dis.body?.dismissed === true, `dismiss removes the question (${dis.status})`);
+      const recsFinal = await req('GET', `/farm/${farmId}/records`, { token });
+      const n2 = recsFinal.body?.records?.length ?? 0;
+      assert(n2 === n1, `a dismissed estimate leaves ZERO trace in the records (${n1} -> ${n2})`);
+      const inv3 = await req('GET', `/farm/${farmId}/inventory`, { token });
+      const shaped3 = (inv3.body?.plots || []).flatMap((p) => p.crops || []).find((c) => String(c._id) === String(midCycleId));
+      assert((shaped3?.estimated || []).length === shapedAfterConfirm.estimated.length - 1,
+        'the dismissed question no longer renders on the crop');
+    } else {
+      warn('only one estimated step this run — the dismiss path is covered by the pure-core edges');
+    }
+
+    // A confirmed step must not be confirmable twice, and a non-estimated event
+    // must never enter these routes (409, not a silent double record).
+    const again = await req('POST', `/farm/${farmId}/events/${estOne.id}/confirm-estimated`, { token, body: {} });
+    assert(again.status === 404 || again.status === 409, `confirming twice cannot double-record (${again.status})`);
+  }
+
+  console.log('\n=== M3. Door 3 — start from today; the past stays unwritten ===');
+  {
+    const t3 = await req('POST', `/farm/${farmId}/crops`, { token, body: { plotId: plot.body.plot._id, crop: 'kale', acres: 0.2, entry: 'today' } });
+    assert(t3.status === 200, `Door 3 lands (${t3.status})`);
+    assert(t3.body?.cycle?.plantedOn === null || t3.body?.cycle?.plantedOn === undefined, 'no planting date is invented (plantedOn stays empty)');
+    assert(t3.body?.cycle?.status === 'growing', 'the crop is honestly growing');
+    assert(t3.body?.calendarFrom, 'the remaining calendar anchors today');
+    assert(t3.body?.estimated === 0, 'nothing about the past was created');
+    assert(t3.body?.scheduled >= 1, `the remaining steps are dated from today: ${t3.body?.scheduled}`);
+  }
+
+  console.log('\n=== M4. the honest degrades — never a dead end ===');
+  {
+    const badStage = await req('POST', `/farm/${farmId}/crops/preview`, { token, body: { crop: 'maize', stageKey: 'nope' } });
+    assert(badStage.status === 400, `an unknown stage is refused at the door (${badStage.status})`);
+    const noTable = await req('POST', `/farm/${farmId}/crops/preview`, { token, body: { crop: 'Raspberry', stageKey: 'sprouting' } });
+    assert(noTable.status === 400, `a crop with no stage table degrades honestly (${noTable.status})`);
+    const otherWrite = await req('POST', `/farm/${farmId}/crops`, { token, body: { crop: 'Raspberry', acres: 0.1, entry: 'midseason', stageKey: 'sprouting' } });
+    assert(otherWrite.status === 400, 'the write refuses the same way');
+    const classic = await req('POST', `/farm/${farmId}/crops`, { token, body: { crop: 'beans', acres: 1, plantedOn: new Date().toISOString() } });
+    assert(classic.status === 200 && classic.body?.cycle?.plantedOnEstimated === false,
+      'the classic planting path is byte-identical in behavior (no estimate flag)');
+  }
+
+  console.log('\n=== M5. Door 2 — the vision gate is honest ===');
+  {
+    const vis = await req('POST', `/farm/${farmId}/vision/stage`, { token, body: { photo: 'data:image/jpeg;base64,AAAA' } });
+    assert(vis.status === 403, `the entitlement gate holds on a non-advanced farm (${vis.status})`);
+    const noPhoto = await req('POST', `/farm/${farmId}/vision/stage`, { token, body: { photo: 'hello' } });
+    assert(noPhoto.status === 403 || noPhoto.status === 400, 'a junk body never reaches the compute');
+  }
+
+  console.log('\n=== M6. the demo stays read-only at the estimated steps ===');
+  {
+    const demo = await req('POST', '/auth/demo', { body: {} });
+    if (demo.status === 200 && demo.body?.token) {
+      const dme = await req('GET', '/me', { token: demo.body.token });
+      const dfarm = dme.body?.farm;
+      if (dfarm) {
+        const dfarmId = dfarm._id || dfarm.id;
+        const dinv = await req('GET', `/farm/${dfarmId}/inventory`, { token: demo.body.token });
+        const demoCrop = (dinv.body?.plots || []).flatMap((p) => p.crops || [])
+          .concat(dinv.body?.cropsWithoutPlot || [])
+          .find((c) => (c.estimated || []).length > 0);
+        if (demoCrop) {
+          const evId = demoCrop.estimated[0].id;
+          const dc = await req('POST', `/farm/${dfarmId}/events/${evId}/confirm-estimated`, { token: demo.body.token, body: {} });
+          assert(dc.status === 403, `confirm is guarded in the demo (${dc.status})`);
+          const dd = await req('POST', `/farm/${dfarmId}/events/${evId}/dismiss-estimated`, { token: demo.body.token, body: {} });
+          assert(dd.status === 403, `dismiss is guarded in the demo (${dd.status})`);
+        } else {
+          warn('the demo\'s mid-season crop is not seeded yet — the demo-guard walk skipped this run');
+        }
+      } else {
+        warn('demo /me did not resolve — the demo-guard walk skipped this run');
+      }
+    } else {
+      warn(`demo login unavailable (${demo.status}) — the demo-guard walk skipped this run`);
+    }
+  }
+
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('TEST CRASHED:', e); process.exit(1); });

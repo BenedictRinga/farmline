@@ -148,6 +148,16 @@ const cropCycleSchema = new Schema({
   acres: { type: Number, default: 0 },
   season: { type: String, default: '' },        // 'long rains 2026'
   plantedOn: { type: Date, default: null },
+  // THE MID-SEASON DOOR (2026-10-09). Two additive fields, one honesty flag:
+  //   plantedOnEstimated — the date was BACK-CALCULATED from the crop's current
+  //     stage (Door 1) and is an estimate by construction; every surface that
+  //     shows it says so.
+  //   cycleStartOn — Door 3 ("just start from today"): the farmer could not place
+  //     the crop in time, so plantedOn stays NULL (nothing is invented) and only
+  //     the REMAINING schedule is anchored here. daysGrowing stays unknown and
+  //     the UI says so.
+  plantedOnEstimated: { type: Boolean, default: false },
+  cycleStartOn: { type: Date, default: null },
   expectedHarvest: { type: Date, default: null },
   intercropWith: { type: String, default: '' },
   fodderFor: { type: String, default: '' },     // 'dairy' when the crop feeds stock
@@ -201,12 +211,18 @@ const scheduledEventSchema = new Schema({
   intervention: { type: String, required: true }, // 'deworming' | 'spray' | 'top-dress' | …
   dueOn: { type: Date, required: true, index: true },
   windowDays: { type: Number, default: 7 },     // tolerance — never "overdue by an hour"
-  status: { type: String, enum: ['due', 'done', 'skipped', 'carried'], default: 'due' },
+  status: { type: String, enum: ['due', 'done', 'skipped', 'carried', 'estimated'], default: 'due' },
   // BASELINE: an interval protocol with no known history. We do not know when the
   // farmer last sprayed or dewormed, so the honest move is to surface it once and
   // ask — not to invent a due date, and not to bury it 14 days out. These render
   // in their own "confirm these" bucket, separate from the day's real work.
   baseline: { type: Boolean, default: false },
+  // ESTIMATED (the mid-season door, 2026-10-09): a past-dated event created from a
+  // BACK-CALCULATED planting date. It is a question — "already done?" — never a
+  // record. Confirm writes the record through the normal completion path; dismiss
+  // deletes the event and leaves zero trace. An estimated event never appears as
+  // the subject's "next due" and never enters the work list by status alone.
+  estimated: { type: Boolean, default: false },
   doseBasis: { type: String, default: '' },
   costEstimate: money,
   // The compliance payload: what this event, once done, holds back from sale.

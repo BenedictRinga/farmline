@@ -108,6 +108,28 @@ const DEMO_SLUG = 'kimani-farms';
     console.log(`  crop ${c.crop}: ${built.created} events`);
   }
 
+  // ── THE MID-SEASON CROP (the founder's brief, 2026-10-09: "the demo
+  // should demonstrate a mid-season crop so visitors SEE the door"). Beans
+  // entered through Door 1: the farmer picked the crop's current stage, the
+  // planting date was BACK-CALCULATED (about four weeks ago), and the steps
+  // that date puts in the past are confirmation-due estimates — "already done
+  // (estimated)?" — while the harvest lands on a real date ahead. Exactly what
+  // POST /farm/:id/crops { entry:'midseason' } does on a real farm.
+  {
+    const planted = day(-28);
+    const midCycle = await CropCycle.create({
+      farmId: farm._id, plotId: hillside._id, crop: 'beans', variety: 'Mwezi moja', acres: 0.25,
+      season: 'mid-season entry', plantedOn: planted, plantedOnEstimated: true, status: 'growing',
+    });
+    const built = await schedule.materialise({
+      farmId: farm._id, subjectType: 'cropcycle', subjectId: midCycle._id,
+      subjectLabel: 'beans', species: 'beans', anchor: planted, markPastAsEstimated: true,
+    });
+    const estCount = await ScheduledEvent.countDocuments({ farmId: farm._id, subjectId: midCycle._id, status: 'estimated' });
+    eventsTotal += built.created;
+    console.log(`  crop beans (MID-SEASON): ${built.created} events, ${estCount} estimated — the door is visible`);
+  }
+
   // ── the herds ───────────────────────────────────────────────────────────────
   const herdDefs = [
     { species: 'cattle', label: 'the dairy cows', count: 5, productionKind: 'milk' },
