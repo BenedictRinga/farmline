@@ -12,6 +12,28 @@
 // Local dev: port 4600.
 const path = require('path');
 const express = require('express');
+
+// ── THE PROCESS SAFETY NET (2026-10-09, the founder's question: "Which is
+// more resilient, LoopKeeper's server, or Farmline's? Zyppar and LoopKeeper
+// do not go down, but Farmline has been from day one, not later than every
+// 48 hours"). THE ANSWER FOUND IN THE CODE: zypparserver catches every
+// uncaughtException/unhandledRejection and TRIAGES it — transient classes
+// (Mongo, ECONNREFUSED, EMFILE/ENOSPC, timeouts) log and CONTINUE; farmline
+// had NO net at all, so any unhandled throw in any socket handler, async
+// boot step or timer killed the whole process (the mandatoryFloor crash
+// loop was exactly this class; the 48-hour cycle is one unguarded path
+// somewhere firing every couple of days). THE FARMLINE NET: log everything
+// with the full stack, and NEVER exit — the farmline API is stateless
+// per-request, so surviving an escaped error is always the right call; the
+// watch's health gate remains the last resort for a true wedge. Zyppar's
+// scar tissue, farmline's now too. ──
+process.on('uncaughtException', (err) => {
+  console.error('[FARMLINE-NET] uncaughtException (survived):', err && err.stack ? err.stack : String(err));
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FARMLINE-NET] unhandledRejection (survived):', reason && reason.stack ? reason.stack : String(reason));
+});
+
 const config = require('./config');
 const auth = require('./auth');
 const vocab = require('./vocab');
