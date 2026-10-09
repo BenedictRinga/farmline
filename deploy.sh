@@ -65,15 +65,21 @@ git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
 
-# THE COUNTER LAW (SHELL FORM, 2026-10-09): the build number climbs on EVERY
-# deploy — max(package.json, commit count)+1 — with NO node dependency (the
-# sudo PATH lacks the nvm node; the first form failed silently).
-CUR_BUILD=$(grep -oE '"build":[ ]*[0-9]+' package.json | grep -oE '[0-9]+' | head -1)
-CUR_BUILD=${CUR_BUILD:-0}
+# THE COUNTER LAW (JSON-AWARE, v3 — 2026-10-09): the build number climbs on
+# EVERY deploy — max(package.json, commit count)+1. The sed form was a JSON
+# bomb (it matched the scripts' "build" key too and broke package.json for
+# yarn). Node parses the JSON properly; the node binary is discovered from
+# yarn's own shebang path if PATH lacks it; if node is truly unreachable the
+# counter honestly skips (the same-number deploy; never a broken file).
+NODE_BIN="$(command -v node || true)"
+if [ -z "$NODE_BIN" ] && [ -x /usr/bin/node ]; then NODE_BIN=/usr/bin/node; fi
+if [ -z "$NODE_BIN" ] && [ -x "$(dirname "$(readlink -f "$(command -v yarn)")")/node" ]; then NODE_BIN="$(dirname "$(readlink -f "$(command -v yarn)")")/node"; fi
 COMMITS=$(git rev-list --count HEAD 2>/dev/null || echo 0)
-NEW_BUILD=$(( CUR_BUILD > COMMITS ? CUR_BUILD : COMMITS + 1 ))
-sed -i "s/\"build\":[ ]*[0-9]*/\"build\": $NEW_BUILD/" package.json
-echo "  build counter -> $NEW_BUILD"
+if [ -n "$NODE_BIN" ]; then
+  "$NODE_BIN" -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.build=Math.max(Number(p.build)||0,Number(process.argv[1])||0)+1;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+String.fromCharCode(10));console.log('  build counter -> '+p.build)" "$COMMITS"
+else
+  echo "  ⚠ node not found — the build counter SKIPPED this deploy (the same-number deploy; never a broken package.json)"
+fi
 echo "3/7  installing (yarn only)…"
 if [ -f yarn.lock ]; then
   yarn install --frozen-lockfile

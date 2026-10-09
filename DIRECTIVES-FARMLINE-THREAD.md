@@ -37,8 +37,11 @@ laws — read them before your first commit.
 5. **The quiet tree**: one thread per repo. If `git status` shows changes you did not
    make, STOP and ask.
 6. **The AOT reality**: `tsc --noEmit` does NOT compile templates — run `npx ngc` when you
-   touch templates. The i18n law: no hardcoded strings in .ts files; the preflight
-   checks parity.
+   touch templates. The i18n law: no hardcoded strings in .ts files; **every string is
+   born in ALL FIVE languages — English, Kiswahili, French, Hausa, Amharic** (the founder's
+   correction 2026-10-09: the en fallback is a safety net, never an acceptable birth state);
+   the preflight checks parity and the coverage scan (`scripts/scan-coverage-20261009.cjs`)
+   is the commit gate.
 7. **The .bak discipline**: never commit `.bak-*` files; the hygiene sweeps remove them.
 8. **The founder's copy law**: no promises of "free/safe/guaranteed"; the no-assurance
    register. English default; Swahili first-class; fr/ha/am growing (the scan script in
