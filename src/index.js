@@ -213,7 +213,6 @@ function fl_recordVisit(req, kind) {
 
 api.post('/auth/demo', auth.mintRateLimit, wrap(async (req, res) => {
   fl_recordVisit(req, 'demo');
-  fl_recordVisit(req, "demo");
   const farm = await Farm.findOne({ isDemo: true });
   if (!farm) return bad(res, 404, 'the demo farm is not seeded yet');
   const member = await Member.findOne({ farmId: farm._id, role: 'owner', active: true });

@@ -352,3 +352,7 @@ Local dev runs on **port 4600** (4200 and 4400 are taken by other projects).
 4. **The boot-seed's cwd is the repo root** (the 2026-10-09 fix: cwd:
    __dirname is src/, which made the demo-seed resolve a nonexistent path and
    crash on every boot — the demo never re-seeded on boot).
+
+5. **The watch that fails silently is no watch (2026-10-09, the third collapse enabler found).** The first watch line pointed at /usr/bin/pm2 — a path that does not exist (the appuser's pm2 lives in the nvm tree: ~/.nvm/versions/node/v20.18.3/bin/pm2) and piped its own failure into /dev/null — it fired every minute and did nothing, invisibly. THE FORM THAT WORKS (and now stands):
+   `* * * * * /usr/bin/curl -sf -m 5 http://127.0.0.1:4600/health || sudo -u appuser -H PM2_HOME=/home/appuser/.pm2 /home/appuser/.nvm/versions/node/v20.18.3/bin/pm2 resurrect >> /var/log/farmline-watch.log 2>&1`
+   — the TRUE pm2 path (resolve with the login shell: which pm2), the explicit PM2_HOME, and the failures LOGGED (/var/log/farmline-watch.log), never discarded. A watch's own failure must always leave a trace.
