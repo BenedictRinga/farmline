@@ -1462,7 +1462,11 @@ server.listen(config.port, () => {
     // process.exit(0) — require()ing it here killed the server (122 pm2
     // restarts). As a CHILD PROCESS its exit is its own; the server lives.
     const { spawn } = require('child_process');
-    const child = spawn(process.execPath, ['scripts/seed-demo-farm.cjs'], { cwd: __dirname, stdio: 'inherit' });
+    // 2026-10-09 THE COLLAPSE AUDIT: cwd: __dirname is src/ — the seed resolves
+  // src/scripts/seed-demo-farm.cjs, which does not exist (the seed lives in
+  // scripts/), so the child crashed on EVERY boot ('[demo-seed] finished,
+  // code 1') and the demo never re-seeded on boot. The repo root is the cwd.
+  const child = spawn(process.execPath, ['scripts/seed-demo-farm.cjs'], { cwd: require('path').join(__dirname, '..'), stdio: 'inherit' });
     child.on('exit', (code) => console.log('[demo-seed] finished, code', code));
   }, 2500);
 for (const sig of ['SIGINT', 'SIGTERM']) {
