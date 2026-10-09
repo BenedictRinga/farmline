@@ -141,8 +141,9 @@ app.get('/api/farmline/version', (_req, res) => {
     build: b,
     // A2 tranche 4 — THE UPDATES SERVICE: the founder's beta floor rides beside
     // the build, so one boot check answers both questions at once.
-    latestBuild: updates.serverBuild(),
-    mandatoryBuild: updates.mandatoryFloor(),
+    // THE LOOPKEEPER COMPOSE (2026-10-09): the version is 0.1.<serverBuild>,
+    // composed from this repo's package.json build — the counter law ticks it.
+    latestVersion: '0.1.' + b,
     // The app reads this to say which environment it is running against. Dev and
     // production share the same public path, so this is the only honest signal.
     env: config.envName,

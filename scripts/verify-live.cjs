@@ -143,7 +143,7 @@ async function get(url, opts = {}) {
   // an HTML body is the failure today's outage class looks like.
   console.log('\napp contract (the paths the app calls)');
   const contract = [
-    { name: 'GET /updates/check (boot, visibility, 5-min poll)', path: '/api/farmline/updates/check?clientBuild=1', statuses: [200], jsonNeeds: ['isUpdateAvailable', 'mandatory', 'type'] },
+    { name: 'GET /updates/check (boot, visibility, 5-min poll)', path: '/api/farmline/updates/check?clientVersion=0.1.0', statuses: [200], jsonNeeds: ['version', 'type'] },
     { name: 'GET /meta/ladder (the teaser blocks)', path: '/api/farmline/meta/ladder?lang=en', statuses: [200], jsonNeeds: ['foundation', 'commercial'] },
     { name: 'GET /farm/:id/inventory (auth shape)', path: '/api/farmline/farm/abc/inventory', statuses: [401], jsonNeeds: null },
     { name: 'POST /auth/farmer/login (the door answers)', path: '/api/farmline/auth/farmer/login', statuses: [400, 401], jsonNeeds: null, method: 'POST', body: '{}' },
@@ -178,12 +178,17 @@ async function get(url, opts = {}) {
     const cacheHeader = String((stamp.headers && stamp.headers.get ? stamp.headers.get('cache-control') : (stamp.headers || {})['cache-control']) || '');
     if (stamp.status === 200 && sj && Number(sj.build) > 0) {
       ok(`/farmline/build.json → build ${sj.build} (@${String(sj.commit || '').slice(0, 7)})`);
-      const chk = await get(`${BASE}/api/farmline/updates/check?clientBuild=1`);
+      // THE LOOPKEEPER TRUTH (2026-10-09): the check composes the SERVER's
+      // version (0.1.<serverBuild>) and compares it to the client's STORED
+      // version — the served bundle's build.json is the APP's stamp, a
+      // different counter. The honest test: a stale client (0.1.0) is told
+      // a different, newer-sounding version.
+      const chk = await get(`${BASE}/api/farmline/updates/check?clientVersion=0.1.0`);
       const cj = (() => { try { return JSON.parse(chk.body); } catch { return null; } })();
-      if (cj && Number(cj.build) === Number(sj.build)) {
-        ok(`/updates/check answers the SERVED bundle's build (${cj.build}) — the truth`);
+      if (cj && cj.version && cj.version !== '0.1.0' && ['flexible', 'immediate'].includes(cj.type)) {
+        ok(`/updates/check tells a stale client (0.1.0) about ${cj.version} (${cj.type}) — the truth`);
       } else if (cj) {
-        bad(`/updates/check answers build ${cj.build}, the served bundle is ${sj.build} — the check is reading the WRONG clock (the "up to date forever" illusion)`);
+        bad(`/updates/check answered ${JSON.stringify(cj).slice(0, 80)} — a stale client is not told an update exists`);
       } else {
         bad('/updates/check did not answer JSON');
       }
@@ -192,7 +197,7 @@ async function get(url, opts = {}) {
       } else {
         bad(`build.json is CACHEABLE (${cacheHeader || 'no header'}) — a reload may never see the new stamp`);
       }
-      const chkRes = await get(`${BASE}/api/farmline/updates/check?clientBuild=1`);
+      const chkRes = await get(`${BASE}/api/farmline/updates/check?clientVersion=0.1.0`);
       const chkCache = String((chkRes.headers && chkRes.headers.get ? chkRes.headers.get('cache-control') : '') || '');
       if (/no-store|no-cache/i.test(chkCache)) {
         ok('the check answer itself is no-store (a cached answer is a lie)');
