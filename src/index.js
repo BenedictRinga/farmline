@@ -399,6 +399,12 @@ api.post('/farm/:farmId/plots', auth.requireAuth('farmer'), auth.requireFarmScop
 // the app on every boot — no extra fetch, nothing to go stale.
 api.post('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const { photo } = req.body || {};
+  // THE DEMO WEARS HER FOUNDER'S PHOTOGRAPH (2026-10-09, the founder: the ×
+  // removed it and it never returned until the next reseed — and a visitor's
+  // upload persisted for every later visitor). The demo farm's face is immutable.
+  const _farm = await Farm.findById(req.params.farmId).select('isDemo').lean();
+  if (_farm?.isDemo) return bad(res, 403, 'The demo wears its own photograph — nothing to change here');
+
   if (typeof photo !== 'string' || !/^data:image\/(jpeg|png);base64,/.test(photo)) {
     return bad(res, 400, 'photo must be a base64 JPEG or PNG data URL');
   }
@@ -408,6 +414,12 @@ api.post('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScop
 }));
 
 api.delete('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  // THE DEMO WEARS HER FOUNDER'S PHOTOGRAPH (2026-10-09, the founder: the ×
+  // removed it and it never returned until the next reseed — and a visitor's
+  // upload persisted for every later visitor). The demo farm's face is immutable.
+  const _farm = await Farm.findById(req.params.farmId).select('isDemo').lean();
+  if (_farm?.isDemo) return bad(res, 403, 'The demo wears its own photograph — nothing to change here');
+
   await Farm.updateOne({ _id: req.params.farmId }, { $set: { photo: '' } });
   return ok(res, { saved: true });
 }));

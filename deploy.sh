@@ -115,10 +115,29 @@ echo "6/7  restarting via pm2…"
 # deploy windows; the watch's resurrect fallback absorbed both). So the pm2
 # actions here ALWAYS run as appuser, whoever runs the deploy.
 pm2_as() { if [ "$(id -un)" = "$APP_USER" ]; then pm2 "$@"; else sudo -u "$APP_USER" pm2 "$@"; fi; }
-pm2_as restart "$PM2_NAME" --update-env 2>/dev/null || pm2_as start "$DEPLOY_DIR/src/index.js" --name "$PM2_NAME"
+# THE RESTART GUARANTEE (2026-10-09, the collapse law): the restart's failure
+# is VISIBLE, the start-if-missing follows, and the resurrect is the net — and
+# the health gate must pass before this deploy may succeed. A failed deploy
+# resurrects; it can never leave the app down silently (the 06:15:50 lesson).
+if ! pm2_as restart "$PM2_NAME" --update-env; then
+  echo "  restart failed — starting from scratch…"
+  pm2_as start "$DEPLOY_DIR/src/index.js" --name "$PM2_NAME" || true
+fi
 pm2_as resurrect >/dev/null 2>&1 || true
-pm2_as restart "$PM2_NAME" --update-env 2>/dev/null || true
 pm2_as save
+PORT_GATE="${PORT:-4600}"
+sleep 2
+if ! curl -fsS "http://localhost:${PORT_GATE}/health" >/dev/null 2>&1; then
+  sleep 3
+  pm2_as resurrect >/dev/null 2>&1 || true
+  sleep 3
+fi
+if ! curl -fsS "http://localhost:${PORT_GATE}/health" >/dev/null 2>&1; then
+  echo "  ✗ THE APP DID NOT COME UP — resurrected twice; the deploy FAILED."
+  echo "    The process is up (the watch pattern); the reason is in: pm2 logs $PM2_NAME"
+  exit 1
+fi
+echo "  ✓ the app is up and answering the health gate"
 
 # 6.5  THE NGINX REQUEST (THE NGINX LAW, 2026-10-07 — HARD: no script writes
 # nginx; agents/scripts make REQUESTS, the founder executes by hand). The
