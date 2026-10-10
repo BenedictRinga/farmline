@@ -72,3 +72,9 @@ laws — read them before your first commit.
 - App: the five languages (the full translation pass), the intro cards (rescued), the
   demo note retired, the elegant arrival pill, the phone-ask, the About-in-Settings.
 - The founder is on the WEBAPP (not the APK); the update counter law is the deliverer.
+
+## THE UPDATES FREEZE ZONE (2026-10-10, the founder: "it has once again stopped working — time to protect it with caveats")
+- THE PAIR: farmline-app/src/app/core/updates.service.ts + farmline/src/updates.js. THE SHAPE: the verbatim LoopKeeper clone (the founder explicit order), with the SERVED-BUNDLE CLOCK (the server reads /var/www/farmline/build.json — the app and the server deploy independently; the server own counter is NOT the clock).
+- THE LAW: DO NOT TOUCH either file without the founder explicit word. No refactor, no tidy-up, no "improvement", no renaming, no shared-helper extraction. The mechanism was broken and repaired three times; every alteration since has regressed it.
+- EVERY SESSION: diff-audit both files at start and end; any change not in your commit history = report it immediately as a suspected foreign alteration, do not absorb it.
+- THE COUNTER LAW (the version tick) is the only sanctioned neighbour: package.json build climbs per deploy; never hand-edit the stored-version flow.
