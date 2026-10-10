@@ -145,7 +145,17 @@ async function charge({ farm, customer, order, amountKES, mode, phone }) {
   // The reference the buyer's phone shows, and the only handle we have until the
   // callback arrives. Short and recognisable on an M-Pesa SMS.
   const localRef = 'FL-' + String(order.ref || '').slice(-6);
-  const callbackUrl = `${config.publicUrl}/api/farmline/mpesa/callback`;
+  // THE CALLBACK SECRET (the audit A1, the founder's ruling 2026-10-10: the
+  // callback authenticates by SECRET IN THE URL — no nginx diff, works today; the
+  // Safaricom IP allowlist is the later hardening). The segment rides the URL we
+  // REGISTER with Daraja, so only a caller holding it can reach settlement.
+  // AUTH_SECRET is the fallback carrier (A4 makes it mandatory in production);
+  // MPESA_CALLBACK_SECRET is the dedicated override when the operator wants to
+  // rotate it independently.
+  const cbSecret = config.envVar('MPESA_CALLBACK_SECRET') || config.envVar('AUTH_SECRET') || '';
+  const callbackUrl = cbSecret
+    ? `${config.publicUrl}/api/farmline/mpesa/callback/${encodeURIComponent(cbSecret)}`
+    : `${config.publicUrl}/api/farmline/mpesa/callback`;
 
   try {
     const push = await mpesa.stkPush({
@@ -192,10 +202,31 @@ async function charge({ farm, customer, order, amountKES, mode, phone }) {
  *
  * Matched on CheckoutRequestID — a receipt number does not exist yet at push time,
  * and matching on anything else risks settling the wrong order.
+ *
+ * A1 (2026-10-10): the settlement is now DEFENDED on three sides.
+ *   · the route authenticates the caller by the secret segment (see index.js);
+ *   · a SHORTFALL — the callback carrying LESS than the ledger row's amountKES —
+ *     is recorded FAILED with the mismatch note, never settled (a wrong
+ *     withdrawal of this kind is somebody's income);
+ *   · a repeat callback (Daraja retries) is idempotent — an already-settled row
+ *     reports already, it does not re-settle.
  */
 async function settleByCheckout(checkoutRequestId, parsed) {
-  const r = await Ledger.updateOne(
-    { mode: 'mpesa', checkoutRequestId: String(checkoutRequestId) },
+  const row = await Ledger.findOne({ mode: 'mpesa', checkoutRequestId: String(checkoutRequestId) }).lean();
+  if (!row) return { ok: false, matched: 0 };
+  if (row.status === 'settled') return { ok: true, matched: 1, already: true };
+
+  const claimed = Number(parsed.amount) || 0;
+  if (parsed.status === 'settled' && claimed + 0.01 < Number(row.amountKES || 0)) {
+    await Ledger.updateOne(
+      { _id: row._id },
+      { $set: { status: 'failed', note: `M-Pesa amount mismatch: expected KES ${row.amountKES}, the callback said KES ${claimed} — refused` } },
+    );
+    return { ok: false, matched: 1, mismatch: true };
+  }
+
+  await Ledger.updateOne(
+    { _id: row._id },
     {
       $set: {
         status: parsed.status === 'settled' ? 'settled' : 'failed',
@@ -207,7 +238,7 @@ async function settleByCheckout(checkoutRequestId, parsed) {
       },
     },
   );
-  return { ok: r.matchedCount > 0, matched: r.matchedCount };
+  return { ok: true, matched: 1 };
 }
 
 // ── DEAD CODE REMOVED (the audit's hygiene, 2026-10-08): money.settle() had

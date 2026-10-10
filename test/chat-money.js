@@ -265,6 +265,80 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     }
   }
 
+  // ── A1: THE CALLBACK FORGERY IS CLOSED (the audit, 2026-10-10) ──────────────
+  // Three proofs against throwaway rows + the response-shape proof over HTTP:
+  // the secret segment gates the door; an unknown CheckoutRequestID touches
+  // nothing; a SHORTFALL is a FAILURE with the mismatch note, never a settlement;
+  // a repeat callback is idempotent; and the order response never carries the
+  // checkoutRequestId the forge would need.
+  {
+    const mongoose = require('mongoose');
+    const { Ledger } = require('../src/models');
+    const config = require('../src/config');
+    const secret = config.envVar('MPESA_CALLBACK_SECRET') || config.envVar('AUTH_SECRET') || '';
+    const probeId = new mongoose.Types.ObjectId();
+    const envelope = (crid, amount) => ({ Body: { stkCallback: { CheckoutRequestID: crid, ResultCode: 0, ResultDesc: 'ok',
+      CallbackMetadata: { Item: [{ Name: 'MpesaReceiptNumber', Value: 'RJ' + String(crid).slice(-6) }, { Name: 'Amount', Value: amount }] } } } });
+
+    // The order-response shape: the DEMO shop carries real inventory, so an order
+    // there reaches the 201 with a payment attempt — the body must not carry the
+    // handle a forge would need.
+    const demo = await call('POST', '/auth/demo', {});
+    const demoSlug = demo.body?.farm?.slug;
+    const demoOrd = demoSlug
+      ? await call('POST', `/shop/${demoSlug}/order`, { lines: [{ product: 'milk', qty: 1 }], pay: true, phone: '0712345678' }, tokA)
+      : { status: 0, body: {} };
+    if (!demoSlug) info('the demo farm is not seeded — the order-shape leg skipped');
+    else if (demoOrd.status === 201) {
+      !JSON.stringify(demoOrd.body).includes('checkoutRequestId')
+        ? ok('the order response carries NO checkoutRequestId (the forge handle is server-side only)')
+        : bad('the order response LEAKS the settlement handle');
+    } else {
+      info(`the demo order answered ${demoOrd.status} (${demoOrd.body?.error || 'no lines available'}) — the shape leg skipped honestly`);
+    }
+
+    const legacy = await call('POST', '/mpesa/callback', envelope('ws_A1_KNOWN', 500));
+    legacy.status === 403
+      ? ok('the LEGACY callback path fails closed (403) — a stale Daraja registration cannot settle')
+      : bad(`the legacy callback path answered ${legacy.status} — the forgery door is still open`);
+
+    if (secret) {
+      try {
+        await Ledger.insertMany([
+          { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 500, ref: 'FL-A1-KNOWN', status: 'pending', checkoutRequestId: 'ws_A1_KNOWN' },
+          { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 500, ref: 'FL-A1-SHORT', status: 'pending', checkoutRequestId: 'ws_A1_SHORT' },
+        ]);
+        const seg = encodeURIComponent(secret);
+        const wrong = await call('POST', '/mpesa/callback/WRONGSEG', envelope('ws_A1_KNOWN', 500));
+        wrong.status === 403
+          ? ok('a WRONG secret segment is refused (403)')
+          : bad(`a wrong secret segment answered ${wrong.status} — the door is decorative`);
+        const unknown = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_UNKNOWN', 500));
+        unknown.status === 200 && unknown.body?.matched === 0
+          ? ok('an UNKNOWN CheckoutRequestID is answered but matches nothing')
+          : bad(`an unknown id answered ${unknown.status} matched ${unknown.body?.matched}`);
+        const good = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_KNOWN', 500));
+        const settled = await Ledger.findOne({ checkoutRequestId: 'ws_A1_KNOWN' }).lean();
+        good.status === 200 && settled?.status === 'settled'
+          ? ok('a well-formed callback SETTLES the known pending row')
+          : bad(`the good callback did not settle (${good.status}, row ${settled?.status})`);
+        const short = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_SHORT', 100));
+        const shortRow = await Ledger.findOne({ checkoutRequestId: 'ws_A1_SHORT' }).lean();
+        shortRow?.status === 'failed' && /mismatch/i.test(shortRow?.note || '')
+          ? ok('a SHORTFALL callback is recorded FAILED with the mismatch note — never settled')
+          : bad(`THE SHORTFALL SETTLED (${shortRow?.status}) — goods for KES 100 of 500`);
+        const again = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_KNOWN', 500));
+        again.body?.already === true
+          ? ok('a repeated callback is idempotent (already settled, no re-settle)')
+          : bad(`a repeated callback answered ${JSON.stringify(again.body)} — Daraja retries must not re-settle`);
+      } finally {
+        await Ledger.deleteMany({ farmId: probeId }).catch(() => {});
+      }
+    } else {
+      info('no MPESA_CALLBACK_SECRET/AUTH_SECRET in this env — the with-secret A1 legs skipped');
+    }
+  }
+
   console.log(`\n${fail ? `CHAT+MONEY FAILED — ${fail} problem(s).` : 'CHAT+MONEY PASSED — both doors work, and the rail is honest.'}\n`);
   process.exit(fail ? 1 : 0);
 })();

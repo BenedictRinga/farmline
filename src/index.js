@@ -1621,19 +1621,41 @@ api.post('/conversations/:id/read', auth.requireAuth('farmer', 'customer'), wrap
 
 // ══════════════════════════════════════════════════════════════════════════════
 // M-PESA CALLBACK — Safaricom posts here. NOT under /api/farmline auth: Daraja has
-// no bearer token, and the only thing that protects this route is that it can only
-// settle a pending entry whose CheckoutRequestID it already knows.
+// no bearer token.
+// A1 (2026-10-10, the founder's ruling): the door now authenticates by SECRET IN
+// THE URL — the segment Daraja registered (money.js builds it from
+// MPESA_CALLBACK_SECRET || AUTH_SECRET). The LEGACY path is kept as a loud 403 so
+// a stale Daraja registration fails CLOSED, never open — the deploy step is to
+// re-register the callback URL with the secret segment.
 // ══════════════════════════════════════════════════════════════════════════════
 api.post('/mpesa/callback', wrap(async (req, res) => {
+  console.warn('[farmline] mpesa callback on the LEGACY path REFUSED — re-register the Daraja callback URL with the secret segment (A1)');
+  return res.status(403).json({ ok: false, error: 'unauthorised callback path' });
+}));
+
+api.post('/mpesa/callback/:seg', wrap(async (req, res) => {
+  const expected = config.envVar('MPESA_CALLBACK_SECRET') || config.envVar('AUTH_SECRET') || '';
+  if (!expected) {
+    // DEV GRACE ONLY: no secret configured anywhere (a keyless local machine).
+    // Production always carries AUTH_SECRET (A4's boot check says so loudly).
+    console.warn('[farmline] mpesa callback accepted WITHOUT a secret — no MPESA_CALLBACK_SECRET/AUTH_SECRET set (dev grace)');
+  } else if (String(req.params.seg) !== expected) {
+    console.warn('[farmline] mpesa callback: BAD secret segment — refused');
+    return res.status(403).json({ ok: false, error: 'unauthorised callback' });
+  }
+
   const parsed = mpesa.parseCallback(req.body);
   if (!parsed.checkoutRequestId) return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
   const out = await money.settleByCheckout(parsed.checkoutRequestId, parsed);
   console.log(`[farmline] mpesa callback ${parsed.checkoutRequestId}: ${parsed.status}`
-    + `${parsed.receipt ? ' ' + parsed.receipt : ''}${out.matched ? '' : ' (no matching ledger entry)'}`);
+    + `${parsed.receipt ? ' ' + parsed.receipt : ''}${out.matched ? '' : ' (no matching ledger entry)'}`
+    + `${out.mismatch ? ' AMOUNT MISMATCH — refused' : ''}${out.already ? ' (already settled)' : ''}`);
 
   // Daraja only needs a 200 with this envelope; it retries on anything else.
-  return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+  // `matched`/`already` ride beside it for the tests and the trail — harmless to
+  // Daraja, and the trail proves the idempotence (A1).
+  return res.json({ ResultCode: 0, ResultDesc: 'Accepted', matched: out.matched, already: !!out.already });
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1843,7 +1865,18 @@ api.post('/shop/:slug/order', auth.requireAuth('customer', 'farmer'), wrap(async
     await order.save();
   }
 
-  return res.status(201).json({ ok: true, order, payment, farm: { name: farm.name, slug: farm.slug } });
+  return res.status(201).json({
+    ok: true,
+    order,
+    // A1: the client NEVER sees the CheckoutRequestID — the handle that could
+    // forge a settlement lives server-side only. The payment shape is explicit:
+    // mode, status, ref, message. Nothing raw from charge() passes through.
+    payment: payment ? {
+      mode: payment.mode, status: payment.status,
+      ref: payment.ref || '', message: payment.message || '',
+    } : null,
+    farm: { name: farm.name, slug: farm.slug },
+  });
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
