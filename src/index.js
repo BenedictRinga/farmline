@@ -48,6 +48,7 @@ const reversal = require('./reversal');
 const protocols = require('./protocols');
 const stages = require('./stages');
 const feedback = require('./feedback');
+const metacounter = require('./metacounter');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
   ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation,
@@ -108,7 +109,7 @@ const shapeMessage = (m) => ({
 // ══════════════════════════════════════════════════════════════════════════════
 // HEALTH / VERSION
 // ──────────────────────────────────────────────────────────────────────────────
-app.get(['/health', config.basePath + '/health'], (_req, res) => res.json(healthPayload()));
+app.get(['/health', config.basePath + '/health'], async (_req, res) => res.json(await healthPayloadAsync()));
 // ── THE DYNAMIC SITEMAP (2026-10-09, the founder's aggressive visibility:
 // "optimize for visibility, and potentially qualify for PlayStore… find
 // every trick to push farmline onto the timelines of AI and search bots") —
@@ -198,7 +199,15 @@ const healthPayload = () => ({
   build: Number(require('../package.json').build) || 0,
   at: new Date().toISOString(),
 });
-api.get('/health', (_req, res) => res.json(healthPayload()));
+// THE DEMO VISION SPEND rides the health answer (Task 3): the existing monitor
+// (the watch, the zyppar Farmline Wire prober) reads it for free. The counter
+// NEVER blocks the watch — a DB hiccup answers without the field.
+const healthPayloadAsync = async () => {
+  const base = healthPayload();
+  try { base.visionCallsToday = await metacounter.count('vision-demo'); } catch { /* absent, not wrong */ }
+  return base;
+};
+api.get('/health', async (_req, res) => res.json(await healthPayloadAsync()));
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH — two principals
@@ -384,7 +393,11 @@ api.post('/farm/:farmId/vision', auth.requireAuth('farmer'), auth.requireFarmSco
   const farm = await Farm.findById(req.auth.sub).lean();
   if (!farm) return bad(res, 404, 'farm not found');
   if (farm.visionTier !== 'advanced') {
-    return bad(res, 403, 'AI Vision is part of the Advanced package');
+    // THE PAID-TIER TRUTH (Task 2, the founder: "attach photo assessment to a paid
+    // tier, so that user is notified on choosing it — this is paid tier, and any
+    // other benefits riding on that tier"): the refusal NAMES the tier and the
+    // other benefits riding it, so even an API-level arrival learns the wall.
+    return bad(res, 403, 'AI Vision is part of the Advanced package — the commercial rungs, with the AI diagnosis, the market intelligence and the priority support (see the ladder)');
   }
   const b = req.body || {};
   // THE PHOTO FIRST: a body the farmer can fix is judged before the key she
@@ -427,6 +440,10 @@ api.post('/farm/:farmId/vision', auth.requireAuth('farmer'), auth.requireFarmSco
       console.warn('[farmline] vision:', r.status, JSON.stringify(j).slice(0, 200));
       return bad(res, 502, 'the vision service did not answer — try again');
     }
+    // THE DEMO VISION SPEND (Task 3): a demo-farm call that the model ANSWERED is
+    // real money — counted in the DB so restarts preserve it, exposed at /health
+    // and /meta/vision-spend, alarmed by the CommandCenter's Farmline Wire.
+    if (farm.isDemo) { try { await metacounter.bump('vision-demo'); } catch { /* the counter never blocks the answer */ } }
     return ok(res, { insight });
   } catch (e) {
     console.warn('[farmline] vision error:', e.message);
@@ -445,7 +462,9 @@ api.post('/farm/:farmId/vision/stage', auth.requireAuth('farmer'), auth.requireF
   const farm = await Farm.findById(req.params.farmId).lean();
   if (!farm) return bad(res, 404, 'farm not found');
   if (farm.visionTier !== 'advanced') {
-    return bad(res, 403, 'AI Vision is part of the Advanced package');
+    // THE PAID-TIER TRUTH (Task 2) — the same sentence the free-text vision route
+    // carries: the refusal names the tier and the benefits riding it.
+    return bad(res, 403, 'AI Vision is part of the Advanced package — the commercial rungs, with the AI diagnosis, the market intelligence and the priority support (see the ladder)');
   }
   const photo = String(req.body?.photo || '');
   if (!photo.startsWith('data:image/')) return bad(res, 400, 'send a photo of the crop');
@@ -494,6 +513,9 @@ api.post('/farm/:farmId/vision/stage', auth.requireAuth('farmer'), auth.requireF
     if (!p || typeof p !== 'object') {
       return bad(res, 502, 'the vision answer could not be read — try again, or pick the stage yourself');
     }
+    // THE DEMO VISION SPEND (Task 3): the model answered a demo-farm call — counted
+    // (the same DB counter /health and /meta/vision-spend expose).
+    if (farm.isDemo) { try { await metacounter.bump('vision-demo'); } catch { /* never blocks */ } }
     const cropRaw = String(p.crop || '').trim().toLowerCase();
     const weeks = Number(p.weeksFromPlanting);
     const note = String(p.note || '').trim().slice(0, 120);
@@ -1805,6 +1827,16 @@ api.get('/admin/farms', wrap(async (req, res) => {
 
 // Re-export the vocab so a reviewer can see the enforced vocabulary from the API.
 api.get('/meta/vocab', (_req, res) => ok(res, { terms: vocab.TERMS, banned: vocab.BANNED }));
+
+// THE DEMO VISION SPEND, exposed (Task 3): the day's demo-farm model calls, the
+// threshold they alarm at, and the moment of the read. PUBLIC — the zyppar
+// Farmline Wire prober polls it without a farmline principal; the number is a
+// counter, not farm data.
+api.get('/meta/vision-spend', async (_req, res) => {
+  let today = 0;
+  try { today = await metacounter.count('vision-demo'); } catch { today = 0; }
+  return ok(res, { today, threshold: config.visionDemoThreshold, at: new Date().toISOString() });
+});
 
 app.use(config.apiPrefix, api);
 

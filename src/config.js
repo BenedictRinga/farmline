@@ -93,6 +93,12 @@ const config = {
   // forever with the buyer's money already gone.
   publicUrl: envVar('FARMLINE_PUBLIC_URL', 'https://zyppar.com'),
 
+  // ── THE DEMO VISION SPEND (Task 3, 2026-10-10) — the daily threshold at which
+  // the CommandCenter's Farmline Wire alarms. The demo farm's photo door makes
+  // REAL billed model calls; the spend is counted (metacounters in the DB),
+  // exposed at /health + /meta/vision-spend, and alarmed at this number.
+  visionDemoThreshold: Number(envVar('FARMLINE_VISION_DEMO_THRESHOLD', '20')) || 20,
+
   /** Admin gate — same shape as rolodex-server's config.checkAdminKey. */
   checkAdminKey(key) {
     const expected = envVar('FARMLINE_ADMIN_KEY');

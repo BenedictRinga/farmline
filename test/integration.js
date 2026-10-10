@@ -842,6 +842,25 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     warn('FARMLINE_ADMIN_KEY not set — the with-key legs skipped this run (the gates themselves verified closed)');
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // § VISION SPEND (Task 3 — the founder: "automate that review to trigger alarm
+  // at CommandCenter once it reaches a threshold"): the counter lives in the DB,
+  // exposed at /meta/vision-spend + /health. The smoke cannot make a real model
+  // call (no OPENROUTER_API_KEY in the test env — an unarmed rail reports itself),
+  // so the increment path is proven by the honest zero here and the wiring by
+  // code; the threshold walk is the founder's on the armed server.
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== V. the demo vision spend — exposed for the alarm ===');
+  {
+    const spend = await req('GET', '/meta/vision-spend');
+    assert(spend.status === 200 && typeof spend.body?.today === 'number',
+      `the spend endpoint answers with the day count (${spend.status}, today=${spend.body?.today})`);
+    assert(Number(spend.body?.threshold) >= 1, `the threshold rides the answer (${spend.body?.threshold})`);
+    const hr2 = await fetch(ROOT + '/health').then((r) => r.json()).catch(() => null);
+    assert(hr2 && typeof hr2.visionCallsToday === 'number',
+      'the health answer carries visionCallsToday (the monitor reads it for free)');
+  }
+
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('TEST CRASHED:', e); process.exit(1); });

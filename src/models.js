@@ -547,6 +547,16 @@ feedbackMsgSchema.index(
   { unique: true, partialFilterExpression: { clientId: { $type: 'string', $gt: '' } } },
 );
 
+// ── META COUNTERS (Task 3, 2026-10-10) — the tiny counters that must outlive a
+// restart, keyed by day: `vision-demo` counts the demo farm's successful vision
+// model calls today, exposed at /health + /meta/vision-spend and alarmed at the
+// threshold by the zyppar CommandCenter's Farmline Wire.
+const metaCounterSchema = new Schema({
+  key: { type: String, required: true, unique: true, index: true },
+  day: { type: String, default: '' },     // the UTC day the count belongs to
+  count: { type: Number, default: 0 },
+}, { timestamps: true });
+
 module.exports = {
   conn,
   migrateLegacyIndexes,
@@ -568,4 +578,5 @@ module.exports = {
   Message: conn.model('Message', messageSchema),
   FeedbackChat: conn.model('FeedbackChat', feedbackChatSchema),
   FeedbackMsg: conn.model('FeedbackMsg', feedbackMsgSchema),
+  MetaCounter: conn.model('MetaCounter', metaCounterSchema),
 };
