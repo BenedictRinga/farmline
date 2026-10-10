@@ -783,6 +783,65 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     }
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // § FEEDBACK CHAT (the LoopKeeper tester-channel mechanism, farmline-shaped —
+  // the founder: "any one can give feedback, text or images. Assign them
+  // persistent id when they try to chat").
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== F1. the persistent id — minted once per device, forever ===');
+  const ADMIN_KEY = require('../src/config').envVar('FARMLINE_ADMIN_KEY');
+  const devA = 'smoke-device-' + Date.now();
+  const mint1 = await req('POST', '/feedback/id', { body: { deviceId: devA } });
+  assert(mint1.status === 200 && /^FL-[A-Z2-9]{5}$/.test(mint1.body?.feedbackId || ''),
+    `the id mints in the FL-XXXXX shape (${mint1.status}, ${mint1.body?.feedbackId})`);
+  const fid = mint1.body?.feedbackId;
+  const mint2 = await req('POST', '/feedback/id', { body: { deviceId: devA } });
+  assert(mint2.status === 200 && mint2.body?.feedbackId === fid && mint2.body?.created === false,
+    'the re-request returns the SAME id — idempotent per device, forever');
+
+  console.log('\n=== F2. the thread — text, photo, and the binding ===');
+  const fsSend = await req('POST', '/feedback/chat', { body: { deviceId: devA, feedbackId: fid, text: 'The kale price line looks off', clientId: 'smoke-fb-1' } });
+  assert(fsSend.status === 200, `a text send lands (${fsSend.status})`);
+  const dup2 = await req('POST', '/feedback/chat', { body: { deviceId: devA, feedbackId: fid, text: 'The kale price line looks off', clientId: 'smoke-fb-1' } });
+  assert(dup2.status === 200 && dup2.body?.duplicate === true, 'a replayed clientId is recognised, never doubled');
+  const photoSend = await req('POST', '/feedback/chat', { body: { deviceId: devA, feedbackId: fid, text: '', photo: 'data:image/jpeg;base64,/9j/4AAQ', clientId: 'smoke-fb-2' } });
+  assert(photoSend.status === 200, `a photo-only message lands (${photoSend.status})`);
+  const emptyMsg = await req('POST', '/feedback/chat', { body: { deviceId: devA, feedbackId: fid, text: '', photo: '' } });
+  assert(emptyMsg.status === 400, `an empty message is refused, never stored (${emptyMsg.status})`);
+  const read1 = await req('GET', `/feedback/chat?deviceId=${devA}&feedbackId=${fid}`);
+  assert(read1.status === 200 && (read1.body?.msgs || []).length === 2,
+    `the read returns the thread (${read1.body?.msgs?.length} msgs, oldest first)`);
+  assert((read1.body?.msgs || []).every((m) => m.from === 'sender'), 'the sender sees their own lines');
+  // THE BINDING: an id presented by a device it was not minted to is refused.
+  const strangerRead = await req('GET', `/feedback/chat?deviceId=smoke-stranger-device&feedbackId=${fid}`);
+  assert(strangerRead.status === 403, `another device cannot read this thread (${strangerRead.status})`);
+  const strangerSend = await req('POST', '/feedback/chat', { body: { deviceId: 'smoke-stranger-device', feedbackId: fid, text: 'hi' } });
+  assert(strangerSend.status === 403, `another device cannot write into this thread (${strangerSend.status})`);
+  // NO AUTH is required at all — an anonymous device walks in and mints/sends.
+  const anon = await req('POST', '/feedback/id', { body: { deviceId: 'smoke-anon-' + Date.now() } });
+  assert(anon.status === 200, 'the door is open to anyone (no token asked)');
+
+  console.log('\n=== F3. HQ — the inbox, the reply, the receipt ===');
+  const inboxNoKey = await req('GET', `/feedback/chat/inbox?key=wrong`);
+  assert(inboxNoKey.status === 401 || inboxNoKey.status === 403, `the inbox is admin-gated (${inboxNoKey.status})`);
+  const replyNoKey = await req('POST', '/feedback/chat/reply', { body: { key: 'wrong', feedbackId: fid, text: 'x' } });
+  assert(replyNoKey.status === 401 || replyNoKey.status === 403, `the reply door is admin-gated (${replyNoKey.status})`);
+  if (ADMIN_KEY) {
+    const inbox1 = await req('GET', `/feedback/chat/inbox?key=${ADMIN_KEY}`);
+    assert(inbox1.status === 200 && Array.isArray(inbox1.body?.threads),
+      `the inbox answers the admin key (${inbox1.status})`);
+    const mine = (inbox1.body?.threads || []).find((t) => t.feedbackId === fid);
+    assert(mine && (mine.msgs || []).length >= 1, 'the new thread is in the inbox with its tail');
+    assert(!!mine?.hqReadAt, 'the inbox read stamps HQ\u2019s receipt');
+    const reply = await req('POST', '/feedback/chat/reply', { body: { key: ADMIN_KEY, feedbackId: fid, text: 'Asante — looking into the kale line now.' } });
+    assert(reply.status === 200, `the reply lands (${reply.status})`);
+    const read2 = await req('GET', `/feedback/chat?deviceId=${devA}&feedbackId=${fid}`);
+    const hq = (read2.body?.msgs || []).filter((m) => m.from === 'hq');
+    assert(hq.length === 1, 'the sender\u2019s next read carries HQ\u2019s reply home');
+  } else {
+    warn('FARMLINE_ADMIN_KEY not set — the with-key legs skipped this run (the gates themselves verified closed)');
+  }
+
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('TEST CRASHED:', e); process.exit(1); });

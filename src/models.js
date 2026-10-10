@@ -507,6 +507,46 @@ async function migrateLegacyIndexes() {
   }
 }
 
+// ── FEEDBACK CHAT (the LoopKeeper tester-channel mechanism, farmline-shaped,
+// 2026-10-10 — the founder: "Clone the chat feature in LoopKeeper home page and
+// place it at header of farmline home (shamba) page, so that it opens and any one
+// can give feedback, text or images. Assign them persistent id when they try to
+// chat"). ANYONE may write — no tester roster, no auth: the persistent FEEDBACK ID
+// is the identity, minted once per device and reused forever. The thread is the
+// sender's line to HQ; HQ reads and replies under the admin key.
+const feedbackChatSchema = new Schema({
+  // THE IDENTITY: server-minted, idempotent per deviceId (a re-request returns the
+  // same id — one id per device, forever). The binding is the scope check: a send
+  // or a read must present the deviceId the id was minted to.
+  feedbackId: { type: String, required: true, unique: true, index: true },
+  deviceId: { type: String, required: true, unique: true, index: true },
+  // READ RECEIPTS both ways (LoopKeeper server 135): senderReadAt on the sender's
+  // own read, hqReadAt on the admin inbox fetch — so the sender can see their
+  // report has been picked up.
+  senderReadAt: { type: Date, default: null },
+  hqReadAt: { type: Date, default: null },
+  lastMessageAt: { type: Date, default: Date.now, index: true },
+}, { timestamps: true });
+
+// The messages are SEPARATE DOCS, not an embedded array: the thread carries photos
+// (data URLs), and one document carrying 80 × 300KB would walk into Mongo's doc
+// limit. Same shape as the farm↔buyer Message: text OR text+photo, never nothing.
+const feedbackMsgSchema = new Schema({
+  threadId: { type: Schema.Types.ObjectId, ref: 'FeedbackChat', required: true, index: true },
+  from: { type: String, enum: ['sender', 'hq'], required: true },
+  text: { type: String, default: '', maxlength: 2000 },
+  photo: { type: String, default: '' },
+  at: { type: Date, default: Date.now, index: true },
+  // OFFLINE-FIRST idempotency, the Log/Message pattern: the client mints the id, so
+  // a replayed send is recognised, never doubled. ABSENT, not '' (the partial index
+  // skips missing fields; a '' value would collide on the second send).
+  clientId: { type: String, index: true },
+}, { timestamps: true });
+feedbackMsgSchema.index(
+  { threadId: 1, clientId: 1 },
+  { unique: true, partialFilterExpression: { clientId: { $type: 'string', $gt: '' } } },
+);
+
 module.exports = {
   conn,
   migrateLegacyIndexes,
@@ -526,4 +566,6 @@ module.exports = {
   PriceObservation: conn.model('PriceObservation', priceSchema),
   Conversation: conn.model('Conversation', conversationSchema),
   Message: conn.model('Message', messageSchema),
+  FeedbackChat: conn.model('FeedbackChat', feedbackChatSchema),
+  FeedbackMsg: conn.model('FeedbackMsg', feedbackMsgSchema),
 };

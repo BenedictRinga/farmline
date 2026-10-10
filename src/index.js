@@ -47,6 +47,7 @@ const projection = require('./projection');
 const reversal = require('./reversal');
 const protocols = require('./protocols');
 const stages = require('./stages');
+const feedback = require('./feedback');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
   ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation,
@@ -1358,6 +1359,91 @@ api.post('/farm/:farmId/events/:eventId/dismiss-estimated', auth.requireAuth('fa
   const out = await ScheduledEvent.findOneAndDelete({ _id: req.params.eventId, farmId: req.params.farmId, status: 'estimated' });
   if (!out) return bad(res, 404, 'event not found — it may already be dismissed');
   return ok(res, { dismissed: true });
+}));
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE FEEDBACK CHAT (the LoopKeeper tester-channel mechanism, farmline-shaped —
+// the founder: "Clone the chat feature in LoopKeeper home page and place it at
+// header of farmline home (shamba) page, so that it opens and any one can give
+// feedback, text or images. Assign them persistent id when they try to chat").
+// The domain logic lives in src/feedback.js; these routes are its HTTP face.
+// NO AUTH on the sender's doors: the persistent FL- id bound to the device is the
+// identity (LoopKeeper's mint, idempotent per device). NO farm document is touched
+// — the demo's immutability is untouched by construction. REST only (the socket
+// requires an HMAC principal an anonymous sender does not have); the sheet polls
+// while it stands.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// The send valve: looser than the mint's (a real conversation sends many lines),
+// still a wall against a flood — 120/hour/IP with the same sweep shape.
+const feedbackSends = new Map();
+function feedbackSendRateLimit(req, res, next) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '?');
+  const now = Date.now();
+  if (feedbackSends.size > 500) {
+    for (const [k, v] of feedbackSends) if (now - v.ts > 3600_000) feedbackSends.delete(k);
+  }
+  const rec = feedbackSends.get(ip) || { n: 0, ts: now };
+  if (now - rec.ts > 3600_000) { rec.n = 0; rec.ts = now; }
+  rec.n += 1;
+  feedbackSends.set(ip, rec);
+  if (rec.n > 120) return res.status(429).json({ ok: false, error: 'too many messages — try again later' });
+  next();
+}
+
+// THE MINT — idempotent per device: the same device always gets the SAME FL- id
+// (LoopKeeper's POST /chat-id shape). One id per device, forever.
+api.post('/feedback/id', auth.mintRateLimit, wrap(async (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').slice(0, 80);
+  if (!deviceId) return bad(res, 400, 'deviceId required');
+  const minted = await feedback.ensureId(deviceId);
+  if (!minted) return bad(res, 500, 'feedback id mint failed');
+  return ok(res, { ok: true, feedbackId: minted.feedbackId, created: minted.created });
+}));
+
+// THE SEND — the sender's line (text or text+photo). Nothing writes without the
+// tap that already happened; the binding (id ↔ device) is the scope check.
+api.post('/feedback/chat', feedbackSendRateLimit, wrap(async (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').slice(0, 80);
+  const feedbackId = String(req.body?.feedbackId || '').toUpperCase().slice(0, 16);
+  if (!deviceId || !feedbackId) return bad(res, 400, 'deviceId and feedbackId required');
+  const r = await feedback.send({
+    deviceId, feedbackId,
+    text: req.body?.text || '', photo: req.body?.photo || '',
+    clientId: String(req.body?.clientId || '').slice(0, 64),
+  });
+  if (!r.ok) return bad(res, r.status || 400, r.error);
+  return ok(res, { ok: true, duplicate: !!r.duplicate });
+}));
+
+// THE READ — the sender's own thread; reading stamps their receipt.
+api.get('/feedback/chat', wrap(async (req, res) => {
+  const deviceId = String(req.query?.deviceId || '').slice(0, 80);
+  const feedbackId = String(req.query?.feedbackId || '').toUpperCase().slice(0, 16);
+  if (!deviceId || !feedbackId) return bad(res, 400, 'deviceId and feedbackId required');
+  const r = await feedback.read({ deviceId, feedbackId });
+  if (!r) return bad(res, 403, 'this feedback id does not belong to this device');
+  return ok(res, { ok: true, ...r });
+}));
+
+// THE HQ INBOX (the FARMLINE_ADMIN_KEY gate, the /admin/farms pattern): every
+// thread, newest activity first; reading stamps HQ's receipt so the sender's
+// sheet can show that the report was picked up.
+api.get('/feedback/chat/inbox', wrap(async (req, res) => {
+  const gate = config.checkAdminKey(String(req.query?.key || ''));
+  if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+  const threads = await feedback.inbox();
+  return ok(res, { ok: true, threads });
+}));
+
+// THE HQ REPLY — HQ's line lands in the same thread; the sender's sheet sees it
+// on the next poll while the sheet stands (the LoopKeeper promise).
+api.post('/feedback/chat/reply', wrap(async (req, res) => {
+  const gate = config.checkAdminKey(String(req.body?.key || ''));
+  if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+  const r = await feedback.reply(req.body?.feedbackId, req.body?.text);
+  if (!r.ok) return bad(res, r.status || 400, r.error);
+  return ok(res, { ok: true });
 }));
 
 api.get('/farm/:farmId/holds', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
