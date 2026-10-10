@@ -59,7 +59,16 @@ app.disable('x-powered-by');
 // A3: nginx sits on loopback — trusting it lets req.ip resolve to the real client
 // address nginx appended, instead of the raw client-controlled header.
 app.set('trust proxy', 'loopback');
-app.use(express.json({ limit: '4mb' }));
+app.use(express.json({ limit: '1mb' }));
+// B14: the security headers Node can own honestly. The FULL story (HSTS, CSP,
+// frame-ancestors on the app shell) belongs to nginx — the requested diff is in
+// the thread report; these three are right at the API layer regardless.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 
 // ── CORS — same rule as LoopKeeper: only when Express is hit DIRECTLY (localhost
 // dev). Behind nginx, nginx owns Access-Control-Allow-Origin; setting it here too
@@ -77,8 +86,15 @@ app.use((req, res, next) => {
 const api = express.Router();
 const ok = (res, body) => res.json({ ok: true, ...body });
 const bad = (res, code, error) => res.status(code).json({ ok: false, error });
+// C7: THE 5XX COUNTER — wrap() logged errors but nothing counted them. The count
+// rides /health (errors5xxToday) so the watch and the CommandCenter wire can
+// alarm on error SPIKES, not just vision spend. In-memory and day-keyed: a
+// restart resets it, and `bootedAt` says so honestly.
+const errStats = { day: new Date().toISOString().slice(0, 10), n: 0, bootedAt: new Date().toISOString() };
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   console.error('[farmline]', req.method, req.originalUrl, e?.message || e);
+  const today = new Date().toISOString().slice(0, 10);
+  if (errStats.day === today) errStats.n += 1; else { errStats.day = today; errStats.n = 1; }
   if (!res.headersSent) res.status(500).json({ ok: false, error: e?.message || 'failed' });
 });
 const slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
@@ -152,12 +168,14 @@ app.get('/api/farmline/sitemap.xml', async (req, res) => {
     const today = new Date().toISOString().slice(0, 10);
     const urls = [
       '  <url><loc>' + base + '/farmline/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>',
-      '  <url><loc>' + base + '/farmline/#/guide</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>',
+      '  <url><loc>' + base + '/farmline/guide</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>',
     ];
     for (const f of farms) {
       if (!f.slug) continue;
       const lastmod = f.updatedAt ? new Date(f.updatedAt).toISOString().slice(0, 10) : today;
-      urls.push('  <url><loc>' + base + '/farmline/#/s/' + f.slug + '</loc><lastmod>' + lastmod + '</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>');
+      // C3: PATH-BASED URLs — the router is path-based (s/:slug), so every hash
+      // URL landed on the splash; the crawlable shape is /farmline/s/<slug>.
+      urls.push('  <url><loc>' + base + '/farmline/s/' + f.slug + '</loc><lastmod>' + lastmod + '</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>');
     }
     const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls.join('\n') + '\n</urlset>';
     res.set('Content-Type', 'application/xml');
@@ -167,15 +185,31 @@ app.get('/api/farmline/sitemap.xml', async (req, res) => {
     return res.status(500).send('sitemap failed');
   }
 });
-app.get('/api/farmline/version', (_req, res) => {
-  const b = Number(require('../package.json').build) || 0;
+app.get('/api/farmline/version', async (_req, res) => {
+  // B1: /version reads THE SERVED-BUNDLE CLOCK — the same source of truth the
+  // frozen updates.js uses (env override → /var/www/farmline/build.json → the
+  // sibling checkout → package.json). The app's guard feeds this number into a
+  // guard whose purpose is to heal a tab holding an old BUNDLE, so the SERVER's
+  // own build was the wrong clock: the app's build is always ahead of it and the
+  // guard never fired on an app deploy — exactly the event that changes chunk
+  // hashes. updates.js stays frozen; this resolution shape is lifted from it.
+  const path = require('path');
+  const candidates = [];
+  if (process.env.FARMLINE_SERVED_BUNDLE) candidates.push(path.join(process.env.FARMLINE_SERVED_BUNDLE, 'build.json'));
+  candidates.push('/var/www/farmline/build.json');
+  candidates.push(path.resolve(process.cwd(), '..', 'farmline-app', 'www', 'build.json'));
+  let b = 0;
+  for (const p of candidates) {
+    try {
+      const stamp = JSON.parse(require('fs').readFileSync(p, 'utf8'));
+      const n = Number(stamp.build);
+      if (Number.isFinite(n) && n > 0) { b = n; break; }
+    } catch { /* the next candidate */ }
+  }
+  if (!b) b = Number(require('../package.json').build) || 0;   // the dev-machine last resort
   res.json({
     version: '0.1.' + b,
     build: b,
-    // A2 tranche 4 — THE UPDATES SERVICE: the founder's beta floor rides beside
-    // the build, so one boot check answers both questions at once.
-    // THE LOOPKEEPER COMPOSE (2026-10-09): the version is 0.1.<serverBuild>,
-    // composed from this repo's package.json build — the counter law ticks it.
     latestVersion: '0.1.' + b,
     // The app reads this to say which environment it is running against. Dev and
     // production share the same public path, so this is the only honest signal.
@@ -237,6 +271,9 @@ const healthPayload = () => ({
 const healthPayloadAsync = async () => {
   const base = healthPayload();
   try { base.visionCallsToday = await metacounter.count('vision-demo'); } catch { /* absent, not wrong */ }
+  // C7: the day's 5xx count — the watch alarms on error SPIKES, not just spend.
+  base.errors5xxToday = errStats.day === new Date().toISOString().slice(0, 10) ? errStats.n : 0;
+  base.bootedAt = errStats.bootedAt;
   return base;
 };
 api.get('/health', async (_req, res) => res.json(await healthPayloadAsync()));
@@ -421,7 +458,20 @@ api.patch('/farm/:farmId/profile', auth.requireAuth('farmer'), auth.requireFarmS
 // failure. The photo travels as the same client-downsized data URL the
 // profile photo uses; a bigger allowance than the profile (a herd shot
 // carries detail), still bounded.
-api.post('/farm/:farmId/vision', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+// B13: the photo routes carry the only big bodies (data-URL photos) — the 4mb
+// limit rides THESE routes; everything else answers under the 1mb default.
+// B7: the daily per-client cap — the first line of defence for the OpenRouter
+// credit (the CommandCenter alarm is the second); the cap counts SUCCESSFUL
+// model answers per client IP per EAT day.
+const visionBody = express.json({ limit: '4mb' });
+const visionIpKey = (req) => 'vision-ip-' + require('crypto').createHash('sha256').update(auth.clientIp(req)).digest('hex').slice(0, 16);
+
+api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const cap = config.visionIpDailyCap;
+  const ipKey = visionIpKey(req);
+  if (await metacounter.count(ipKey) >= cap) {
+    return bad(res, 429, `the photo door has a daily limit of ${cap} per device — try again tomorrow`);
+  }
   const farm = await Farm.findById(req.auth.sub).lean();
   if (!farm) return bad(res, 404, 'farm not found');
   if (farm.visionTier !== 'advanced') {
@@ -476,6 +526,8 @@ api.post('/farm/:farmId/vision', auth.requireAuth('farmer'), auth.requireFarmSco
     // real money — counted in the DB so restarts preserve it, exposed at /health
     // and /meta/vision-spend, alarmed by the CommandCenter's Farmline Wire.
     if (farm.isDemo) { try { await metacounter.bump('vision-demo'); } catch { /* the counter never blocks the answer */ } }
+    // B7: the caller's own daily cap counts the same successful answer.
+    try { await metacounter.bump(ipKey); } catch { /* never blocks */ }
     return ok(res, { insight });
   } catch (e) {
     console.warn('[farmline] vision error:', e.message);
@@ -490,7 +542,12 @@ api.post('/farm/:farmId/vision', auth.requireAuth('farmer'), auth.requireFarmSco
 // capture-honesty law) — this route only READS the photo and returns a proposal.
 // Same entitlement gate as the free-text vision route; the demo farm carries
 // visionTier 'advanced' so a visitor can walk this door too.
-api.post('/farm/:farmId/vision/stage', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const cap = config.visionIpDailyCap;
+  const ipKey = visionIpKey(req);
+  if (await metacounter.count(ipKey) >= cap) {
+    return bad(res, 429, `the photo door has a daily limit of ${cap} per device — try again tomorrow`);
+  }
   const farm = await Farm.findById(req.params.farmId).lean();
   if (!farm) return bad(res, 404, 'farm not found');
   if (farm.visionTier !== 'advanced') {
@@ -548,6 +605,8 @@ api.post('/farm/:farmId/vision/stage', auth.requireAuth('farmer'), auth.requireF
     // THE DEMO VISION SPEND (Task 3): the model answered a demo-farm call — counted
     // (the same DB counter /health and /meta/vision-spend expose).
     if (farm.isDemo) { try { await metacounter.bump('vision-demo'); } catch { /* never blocks */ } }
+    // B7: the caller's own daily cap counts the same successful answer.
+    try { await metacounter.bump(ipKey); } catch { /* never blocks */ }
     const cropRaw = String(p.crop || '').trim().toLowerCase();
     const weeks = Number(p.weeksFromPlanting);
     const note = String(p.note || '').trim().slice(0, 120);
@@ -1468,7 +1527,9 @@ api.get('/feedback/chat', wrap(async (req, res) => {
 // thread, newest activity first; reading stamps HQ's receipt so the sender's
 // sheet can show that the report was picked up.
 api.get('/feedback/chat/inbox', wrap(async (req, res) => {
-  const gate = config.checkAdminKey(String(req.query?.key || ''));
+  // B11: the admin key rides the x-admin-key HEADER; the query form still works
+  // for one release, then deprecates (query strings land in logs and history).
+  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || req.query?.key || ''));
   if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
   const threads = await feedback.inbox();
   return ok(res, { ok: true, threads });
@@ -1799,7 +1860,11 @@ api.get('/shop/:slug/order/:id', wrap(async (req, res) => {
     order: {
       id: String(order._id), ref: order.ref, stage: order.stage,
       lines: order.lines, subtotal: order.subtotal, deliveryFee: order.deliveryFee,
-      total: order.total, how: order.how, slot: order.slot, addr: order.addr,
+      total: order.total, how: order.how, slot: order.slot,
+      // B9 (the founder's ruling): addr is DROPPED from the public read — this
+      // link is handed out and lives forever; the buyer sees their own address in
+      // their session (the 201 response), not on a shareable URL. The signed-URL
+      // alternative was judged overkill for now.
       createdAt: order.createdAt,
     },
   });
@@ -1856,18 +1921,30 @@ api.post('/shop/:slug/order', auth.requireAuth('customer', 'farmer'), wrap(async
   const fee = how === 'delivery' ? Number(farm.terms?.deliveryFee || 0) : 0;
   const total = subtotal + fee;
 
-  const order = await Order.create({
-    farmId: farm._id,
-    customerId: req.auth.typ === 'customer' ? req.auth.sub : null,
-    ref: 'FL-' + Math.random().toString(36).slice(2, 7).toUpperCase(),
-    lines, subtotal, deliveryFee: fee, total, how,
-    slot: String(req.body?.slot || '').slice(0, 80),
-    addr: String(req.body?.addr || '').slice(0, 200),
-    note: String(req.body?.note || '').slice(0, 300),
-    stage: 1,
-    stageHistory: [{ stage: 1, at: new Date() }],
-    payment: { mode: money.modeFor(farm), status: 'unpaid' },
-  });
+  // B8: the ref is the buyer's receipt on an M-Pesa SMS — human-readable stays —
+  // but 5 random chars (~60M of space) behind a global unique index with no retry
+  // surfaced a duplicate key as a 500 mid-checkout with money already in flight.
+  // 8 hex chars from crypto (~4 billion) + a small retry loop on E11000.
+  let order = null;
+  for (let attempt = 0; attempt < 4 && !order; attempt++) {
+    try {
+      order = await Order.create({
+        farmId: farm._id,
+        customerId: req.auth.typ === 'customer' ? req.auth.sub : null,
+        ref: 'FL-' + require('crypto').randomBytes(4).toString('hex').toUpperCase(),
+        lines, subtotal, deliveryFee: fee, total, how,
+        slot: String(req.body?.slot || '').slice(0, 80),
+        addr: String(req.body?.addr || '').slice(0, 200),
+        note: String(req.body?.note || '').slice(0, 300),
+        stage: 1,
+        stageHistory: [{ stage: 1, at: new Date() }],
+        payment: { mode: money.modeFor(farm), status: 'unpaid' },
+      });
+    } catch (e) {
+      if (e?.code !== 11000) throw e;   // a real failure is not a collision
+    }
+  }
+  if (!order) return bad(res, 500, 'the order reference collided four times — please try again');
 
   // Payment is attempted only when asked for, and a failure never destroys the
   // order — the farmer still gets the work, which is the point of the app.
@@ -1912,19 +1989,28 @@ api.get('/meta/ladder', (req, res) => {
 });
 
 api.get('/admin/farms', wrap(async (req, res) => {
-  const gate = config.checkAdminKey(String(req.query?.key || ''));
+  // B11: the admin key rides the x-admin-key HEADER (query strings land in nginx
+  // access logs, browser history and Referer); the query form still works for one
+  // release for anything already calling it, then deprecates.
+  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || req.query?.key || ''));
   if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
   const farms = await Farm.find().sort({ createdAt: -1 }).limit(100).lean();
-  const withCounts = [];
-  for (const f of farms) {
-    withCounts.push({
-      id: f._id, name: f.name, slug: f.slug, rung: f.rung, moneyMode: money.modeFor(f),
-      logs: await Log.countDocuments({ farmId: f._id }),
-      orders: await Order.countDocuments({ farmId: f._id }),
-      createdAt: f.createdAt,
-    });
-  }
-  return ok(res, { farms: withCounts, count: withCounts.length });
+  // B12: two aggregations instead of 200 count queries — the admin surface was
+  // N+1 (2 counts per farm × 100 farms) and would time out as data grows.
+  const ids = farms.map((f) => f._id);
+  const [logAgg, orderAgg] = await Promise.all([
+    Log.aggregate([{ $match: { farmId: { $in: ids } } }, { $group: { _id: '$farmId', n: { $sum: 1 } } }]),
+    Order.aggregate([{ $match: { farmId: { $in: ids } } }, { $group: { _id: '$farmId', n: { $sum: 1 } } }]),
+  ]);
+  const logBy = new Map(logAgg.map((r) => [String(r._id), r.n]));
+  const orderBy = new Map(orderAgg.map((r) => [String(r._id), r.n]));
+  const withCounts = farms.map((f) => ({
+    id: f._id, name: f.name, slug: f.slug, rung: f.rung, moneyMode: money.modeFor(f),
+    logs: logBy.get(String(f._id)) || 0,
+    orders: orderBy.get(String(f._id)) || 0,
+    createdAt: f.createdAt,
+  }));
+  return ok(res, { farms: withCounts, count: withCounts.length, authArmed: auth.authArmed });
 }));
 
 // Re-export the vocab so a reviewer can see the enforced vocabulary from the API.
@@ -1971,6 +2057,17 @@ app.get('/', (_req, res) => res.json({
 }));
 
 app.use((req, res) => res.status(404).json({ ok: false, error: 'no such route', path: req.originalUrl }));
+
+// B13: body-parser errors answered in the app's own shape, not Express's HTML
+// page (the client's err.error.error read was receiving HTML). A malformed body
+// is a 400 with a sentence; an oversized one is a 413.
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') return res.status(413).json({ ok: false, error: 'the request body is too large' });
+  if (err instanceof SyntaxError || err?.status === 400 || err?.statusCode === 400) {
+    return res.status(400).json({ ok: false, error: 'the request body could not be read' });
+  }
+  return next(err);
+});
 
 // ── boot ──────────────────────────────────────────────────────────────────────
 // http.createServer rather than app.listen, because socket.io needs to share the

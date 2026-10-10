@@ -134,18 +134,30 @@ async function read({ deviceId, feedbackId }) {
  * show the receipt (LoopKeeper server 135, the accountability shape).
  */
 async function inbox({ tail = 8 } = {}) {
+  // B12 (the GLM audit): ONE updateMany stamps the receipts (was 50 updateOnes)
+  // and ONE sorted fetch feeds the tails (was 50 find queries) — the admin
+  // surface no longer walks an N+1 that would time out as data grows.
   const threads = await FeedbackChat.find().sort({ lastMessageAt: -1 }).limit(50).lean();
   const now = new Date();
-  const out = [];
-  for (const th of threads) {
-    await FeedbackChat.updateOne({ _id: th._id }, { $set: { hqReadAt: now } }).catch(() => null);
-    const msgs = await threadMessages(th._id, { limit: tail });
-    out.push({
-      feedbackId: th.feedbackId, deviceId: th.deviceId, lastMessageAt: th.lastMessageAt,
-      hqReadAt: now, createdAt: th.createdAt, msgs,
-    });
+  if (threads.length) {
+    await FeedbackChat.updateMany({ _id: { $in: threads.map((t) => t._id) } }, { $set: { hqReadAt: now } }).catch(() => null);
   }
-  return out;
+  const ids = threads.map((t) => t._id);
+  const msgs = ids.length
+    ? await FeedbackMsg.find({ threadId: { $in: ids } }).sort({ at: -1 }).limit(ids.length * tail).lean()
+    : [];
+  const byThread = new Map();
+  for (const m of msgs) {
+    const k = String(m.threadId);
+    const arr = byThread.get(k) || [];
+    if (arr.length < tail) arr.push(m);
+    byThread.set(k, arr);
+  }
+  return threads.map((th) => ({
+    feedbackId: th.feedbackId, deviceId: th.deviceId, lastMessageAt: th.lastMessageAt,
+    hqReadAt: now, createdAt: th.createdAt,
+    msgs: (byThread.get(String(th._id)) || []).reverse(),
+  }));
 }
 
 /** THE HQ REPLY (admin-key gated at the route): HQ's line lands in the same thread. */

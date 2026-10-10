@@ -99,6 +99,12 @@ const config = {
   // exposed at /health + /meta/vision-spend, and alarmed at this number.
   visionDemoThreshold: Number(envVar('FARMLINE_VISION_DEMO_THRESHOLD', '20')) || 20,
 
+  // B7 (the GLM audit, 2026-10-10): the DAILY CAP PER CLIENT on the vision routes
+  // — the first line of defence for the OpenRouter credit (the CommandCenter
+  // alarm is the second). A human walking the demo needs a handful; a bot hits
+  // the wall. Per EAT day, keyed on the client IP.
+  visionIpDailyCap: Number(envVar('FARMLINE_VISION_IP_DAILY_CAP', '10')) || 10,
+
   /** Admin gate — same shape as rolodex-server's config.checkAdminKey. */
   checkAdminKey(key) {
     const expected = envVar('FARMLINE_ADMIN_KEY');
