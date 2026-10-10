@@ -110,6 +110,18 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     } else {
       warn('only one due event — the double-completion regression is not covered this run');
     }
+
+    // ── A5: THE DOUBLE-TAP IS IDEMPOTENT (the GLM audit, 2026-10-10) ───────────
+    // Completing the SAME event twice writes ONE record, ONE set of holds and ONE
+    // next occurrence: the atomic claim turns the second call into an honest
+    // no-op that reports alreadyDone.
+    const first2 = await req('POST', `/farm/${farmId}/events/${deworm._id}/complete`, { token, body: { clientId: 'smoke-done-1' } });
+    assert(first2.body?.alreadyDone === true, `the FIRST repeat reports alreadyDone (${first2.status})`);
+    const second2 = await req('POST', `/farm/${farmId}/events/${deworm._id}/complete`, { token, body: { clientId: 'smoke-done-1' } });
+    assert(second2.body?.alreadyDone === true, 'the SECOND repeat also reports alreadyDone (the client-id replay lands too)');
+    const { Log } = require('../src/models');   // the same direct-model pattern chat-money.js proved
+    const n = await Log.countDocuments({ farmId, scheduledEventId: deworm._id });
+    assert(n === 1, `exactly ONE record for the doubly-completed event (${n})`);
   }
 
   console.log('\n=== 5b. LAYER 1 — what do I have? ===');

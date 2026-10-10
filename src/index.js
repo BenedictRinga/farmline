@@ -1350,6 +1350,10 @@ api.post('/farm/:farmId/events/:eventId/complete', auth.requireAuth('farmer'), a
   const result = await schedule.complete({
     farm, eventId: req.params.eventId, byMemberId: req.auth.mid || null,
     productUsed: req.body?.productUsed || '', speciesHint: req.body?.species || '',
+    // A5: the client's own id — the second tap (or the TRY-AGAIN retry) lands on
+    // the atomic claim as an honest no-op, and the Log's partial index recognises
+    // a replayed id.
+    clientId: String(req.body?.clientId || '').slice(0, 64),
   });
   if (!result.ok) return bad(res, 404, result.error || 'event not found');
   const holds = await projection.activeHolds(req.params.farmId);

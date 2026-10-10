@@ -154,8 +154,22 @@ function findProtocol(species, intervention) {
  *   4. schedules the next occurrence for interval protocols
  *   5. stamps the farm's confidence clock
  */
-async function complete({ farm, eventId, byMemberId = null, productUsed = '', speciesHint = '', noteExtra = '' }) {
-  const ev = await ScheduledEvent.findOne({ _id: eventId, farmId: farm._id });
+async function complete({ farm, eventId, byMemberId = null, productUsed = '', speciesHint = '', noteExtra = '', clientId = '' }) {
+  // A5 (the GLM audit, 2026-10-10): THE CLAIM IS ATOMIC — findOneAndUpdate gated
+  // on the still-open statuses, so two concurrent requests cannot both win. A null
+  // claim is the honest "already done" (the double-tap and the TRY-AGAIN retry
+  // both land here and change nothing — one record, one set of holds, one next).
+  const claimed = await ScheduledEvent.findOneAndUpdate(
+    { _id: eventId, farmId: farm._id, status: { $in: ['due', 'carried', 'estimated'] } },
+    { $set: { status: 'done', doneAt: new Date(), doneBy: byMemberId } },
+    { new: true },
+  );
+  if (!claimed) {
+    const cur = await ScheduledEvent.findOne({ _id: eventId, farmId: farm._id }).select('status').lean();
+    if (cur?.status === 'done') return { ok: true, alreadyDone: true };
+    return { ok: false, error: 'not found' };
+  }
+  const ev = claimed;
   if (!ev) return { ok: false, error: 'not found' };
 
   // THE SPECIES IS A DB READ AWAY (the audit's silent-hold fix, 2026-10-08):
@@ -172,12 +186,13 @@ async function complete({ farm, eventId, byMemberId = null, productUsed = '', sp
   const proto = findProtocol(species, ev.intervention);
 
   ev.status = 'done';
-  ev.doneAt = new Date();
-  ev.doneBy = byMemberId;
+  ev.doneAt = ev.doneAt || new Date();
+  ev.doneBy = ev.doneBy || byMemberId;
   ev.productUsed = productUsed || (proto?.en || ev.intervention);
   await ev.save();
 
-  // 2. the record
+  // 2. the record — carrying the client's own id, so even a client that retried
+  // around the claim is recognised by the Log's partial index (A5, belt+braces).
   const log = await Log.create({
     farmId: farm._id,
     kind: ev.intervention.includes('spray') ? 'spray'
@@ -194,6 +209,7 @@ async function complete({ farm, eventId, byMemberId = null, productUsed = '', sp
     product: productUsed || ev.intervention,
     note: `from the schedule: ${proto?.en || ev.intervention}${noteExtra ? ` — ${noteExtra}` : ''}`,
     scheduledEventId: ev._id,
+    clientId: clientId || undefined,
   });
 
   // 3. the hold — the compliance payload.
