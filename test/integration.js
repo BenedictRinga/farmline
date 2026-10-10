@@ -35,9 +35,11 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   // these checks exercise — or fails outright when no dev server is running.
   const hr = await fetch(ROOT + '/health').then((r) => r.json()).catch(() => null);
   assert(hr?.ok === true, 'server is up');
-  console.log(`  info  db=${hr?.db} dbName=${hr?.dbName} auth=${hr?.authArmed ? 'ARMED' : 'OPEN'} money=${hr?.moneyMode}`);
+  // A4: authArmed left the public /health on purpose (a server must not advertise
+  // its disarmament); the arm state is asserted module-side instead.
+  console.log(`  info  db=${hr?.db} dbName=${hr?.dbName} money=${hr?.moneyMode}`);
   assert(hr?.dbName === 'farmline', 'connected to the farmline database (never zyppar/rolodex)');
-  assert(hr?.authArmed === true, 'the write gate is ARMED (AUTH_SECRET set)');
+  assert(require('../src/auth').authArmed === true, 'the write gate is ARMED (AUTH_SECRET set)');
 
   console.log('\n=== 1. farmer register ===');
   const reg = await req('POST', '/auth/farmer/register', {
@@ -947,6 +949,37 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     // AND the binding still guards the read: a stranger device gets the 403.
     const strangerRead = await req('GET', `/rating?deviceId=smoke-stranger-device&feedbackId=${freshMint.body.feedbackId}`);
     assert(strangerRead.status === 403, `a stranger's read of an id is refused (${strangerRead.status})`);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // § AUTH (A4 — the fail-fast): production without AUTH_SECRET is CLOSED (503 on
+  // every gated route), while the development grace still admits the dev
+  // principal. Verified in a CHILD PROCESS (auth.js caches the secret at require
+  // time, so the shape of the boot is what is being tested): NODE_ENV decides,
+  // config.envVar is patched to hide the secret, and the mock res records the
+  // answer. The smoke server itself runs development WITH the secret — this child
+  // is the only honest way to walk the production shape.
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== A4. AUTH_SECRET: production CLOSED, development graceful ===');
+  {
+    const { spawnSync } = require('child_process');
+    const ROOT = process.cwd().replace(/\\/g, '/');
+    const child = (nodeEnv) => {
+      const script = `
+        process.env.NODE_ENV = '${nodeEnv}';
+        const config = require('${ROOT}/src/config.js');
+        const orig = config.envVar;
+        config.envVar = (name, fb) => (name === 'AUTH_SECRET' || name === 'MPESA_CALLBACK_SECRET') ? '' : orig(name, fb);
+        const auth = require('${ROOT}/src/auth.js');
+        const res = { code: '', status(c) { this.code = c; return this; }, json() { return this; } };
+        auth.requireAuth('farmer')({ headers: {}, socket: {} }, res, () => { res.code = 'next'; });
+        console.log('RESULT=' + res.code);
+      `;
+      const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env: { ...process.env } });
+      return (r.stdout || '').match(/RESULT=(\S+)/)?.[1] || ('stderr:' + String(r.stderr).slice(0, 80));
+    };
+    assert(child('production') === '503', 'production without AUTH_SECRET is CLOSED (503 on a gated route)');
+    assert(child('development') === 'next', 'development without AUTH_SECRET keeps the honest grace (the dev principal walks)');
   }
 
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));

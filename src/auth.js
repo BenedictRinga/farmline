@@ -77,16 +77,28 @@ function bearer(req) {
 
 /**
  * Gate a route to one or more token types.
- * Fails OPEN when AUTH_SECRET is unset (same deliberate grace as LoopKeeper: a
- * keyless local dev must not die), and says so once, loudly.
+ * A4 (the GLM audit, 2026-10-10 — the founder verified the droplet .env DOES
+ * carry AUTH_SECRET): the fail-open is now DEV-ONLY. A keyless local dev machine
+ * keeps its grace (the dev principal, farm-scoped); a PRODUCTION process without
+ * AUTH_SECRET is CLOSED — every gated route answers 503 with a loud sentence, and
+ * the boot says so once. Fail-open on a public host was the wrong default: an env
+ * mishap silently converted the API into an open farm-scoped write surface.
  */
 function requireAuth(...types) {
   const wanted = types.length ? types : ['farmer', 'customer'];
   return function (req, res, next) {
     if (!AUTH_SECRET) {
+      const devGrace = !config.isProduction && config.envName === 'development';
+      if (!devGrace) {
+        if (!requireAuth.warnedClosed) {
+          requireAuth.warnedClosed = true;
+          console.error('[auth] AUTH_SECRET is NOT SET — production gate CLOSED: every gated route answers 503. Set AUTH_SECRET in .env and restart.');
+        }
+        return res.status(503).json({ ok: false, error: 'the server is not armed (AUTH_SECRET missing) — contact the operator' });
+      }
       if (!requireAuth.warned) {
         requireAuth.warned = true;
-        console.warn('[auth] AUTH_SECRET not set — the gate is OPEN. Set AUTH_SECRET in .env to arm it.');
+        console.warn('[auth] AUTH_SECRET not set — the gate is OPEN (development grace). Set AUTH_SECRET in .env to arm it.');
       }
       req.auth = { sub: 'dev', role: 'dev', typ: 'dev' };
       return next();
@@ -113,9 +125,24 @@ function requireFarmScope(req, res, next) {
 }
 
 // ── Rate limiting for token minting (in-memory valve, like LoopKeeper's) ──────
+// A3 (the GLM audit, 2026-10-10): the bucket key was the RAW x-forwarded-for —
+// a client-supplied header that nginx APPENDS to, so every request with a fresh
+// spoofed header got its own bucket and every valve was decorative. THE ONE
+// HELPER: x-real-ip is SET by nginx from $remote_addr and cannot be spoofed;
+// req.ip (with trust proxy) and the socket address are the fallbacks.
+// THE HONEST LIMITATION: these valves are in-memory Maps — they reset on restart
+// and do not span pm2 workers. Accepted for now (a single instance); a shared
+// store (Redis) is the later hardening, not built here.
+function clientIp(req) {
+  const real = req.headers?.['x-real-ip'];
+  if (real) return String(real).split(',')[0].trim();
+  const ip = req.ip || req.socket?.remoteAddress || '?';
+  return String(ip).split(',')[0].trim();
+}
+
 const mints = new Map(); // ip -> { n, ts }
 function mintRateLimit(req, res, next) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '?');
+  const ip = clientIp(req);
   const now = Date.now();
   // THE AUDIT'S SMALL LEAK (2026-10-08): the valve never pruned — every IP that
   // ever minted stayed in the map for the life of the process. On a public
@@ -136,6 +163,7 @@ function mintRateLimit(req, res, next) {
 module.exports = {
   AUTH_SECRET,
   authArmed: !!AUTH_SECRET,
+  clientIp,
   mintFarmerToken, mintCustomerToken, verify,
   hashPin, checkPin,
   requireAuth, requireFarmScope, mintRateLimit,

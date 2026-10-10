@@ -56,6 +56,9 @@ const {
 
 const app = express();
 app.disable('x-powered-by');
+// A3: nginx sits on loopback — trusting it lets req.ip resolve to the real client
+// address nginx appended, instead of the raw client-controlled header.
+app.set('trust proxy', 'loopback');
 app.use(express.json({ limit: '4mb' }));
 
 // ── CORS — same rule as LoopKeeper: only when Express is hit DIRECTLY (localhost
@@ -219,7 +222,9 @@ const healthPayload = () => ({
   ok: true,
   db: conn.readyState === 1 ? 'connected' : 'connecting',
   dbName: config.dbName,
-  authArmed: auth.authArmed,
+  // A4: authArmed is NO LONGER published here — /health is public, and a server
+  // with no secret must not advertise its own disarmament to the internet. The
+  // armed state lives in the boot log (line ~1986) and in /admin/farms (gated).
   moneyMode: config.moneyMode,
   mpesaConfigured: money.mpesaConfigured(),
   basePath: config.basePath,
@@ -1407,7 +1412,7 @@ api.post('/farm/:farmId/events/:eventId/dismiss-estimated', auth.requireAuth('fa
 // still a wall against a flood — 120/hour/IP with the same sweep shape.
 const feedbackSends = new Map();
 function feedbackSendRateLimit(req, res, next) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '?');
+  const ip = auth.clientIp(req);   // A3: the unspoofable resolution, one helper
   const now = Date.now();
   if (feedbackSends.size > 500) {
     for (const [k, v] of feedbackSends) if (now - v.ts > 3600_000) feedbackSends.delete(k);
