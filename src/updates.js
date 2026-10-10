@@ -30,8 +30,26 @@ function normalizeVersion(version) {
   return m ? m[0] : undefined;
 }
 
-/** The LoopKeeper build-94 compose: 0.1.<serverBuild> from this repo's package.json. */
+// THE SERVED-BUNDLE CLOCK (2026-10-10, the detach cure): the app and the
+// server deploy INDEPENDENTLY, so the server's own package.json build is the
+// WRONG clock — it froze at 97 while the served app moved 44→45→46, and every
+// app deploy after the first successful update was invisible (the founder's
+// "detaching after just one successful run"). The served bundle's
+// build.json IS the update clock: resolution order = the env override →
+// /var/www/farmline/build.json → the sibling checkout → this repo's
+// package.json (the last resort on a dev machine).
 async function serverVersion() {
+  const candidates = [];
+  if (process.env.FARMLINE_SERVED_BUNDLE) candidates.push(path.join(process.env.FARMLINE_SERVED_BUNDLE, 'build.json'));
+  candidates.push('/var/www/farmline/build.json');
+  candidates.push(path.resolve(process.cwd(), '..', 'farmline-app', 'www', 'build.json'));
+  for (const p of candidates) {
+    try {
+      const stamp = JSON.parse(await fs.promises.readFile(p, 'utf8'));
+      const n = Number(stamp.build);
+      if (Number.isFinite(n) && n > 0) return `0.1.${n}`;
+    } catch { /* the next candidate */ }
+  }
   try {
     const pkg = JSON.parse(await fs.promises.readFile(path.resolve(process.cwd(), 'package.json'), 'utf8'));
     return `0.1.${Number(pkg.build) || 0}`;
