@@ -51,7 +51,7 @@ const feedback = require('./feedback');
 const metacounter = require('./metacounter');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
-  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation,
+  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating,
 } = require('./models');
 
 const app = express();
@@ -1466,6 +1466,59 @@ api.post('/feedback/chat/reply', wrap(async (req, res) => {
   const r = await feedback.reply(req.body?.feedbackId, req.body?.text);
   if (!r.ok) return bad(res, r.status || 400, r.error);
   return ok(res, { ok: true });
+}));
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE RATINGS (Task 6, the founder: "an intuitive ratings bar — Rate Farmline,
+// backend persisted, truthful, and live — inside the top section of the Feedback
+// chat interface, sticky"). THE IDENTITY is the FL- feedback id (Task 5's mint —
+// the sheet's native identity; a signed-in farmer using the sheet carries theirs
+// all the same). ONE current rating per identity, the latest wins; the history
+// keeps the trend (capped at 20). The tap IS the action (the capture-honesty law);
+// the id↔device binding is the scope check (the chat's law); NO farm document is
+// touched (demo-safe by construction).
+// ══════════════════════════════════════════════════════════════════════════════
+
+// THE RATE — one tap, the rating lands. Re-taps update (latest wins); the previous
+// value falls into the history for the trend.
+api.post('/rating', auth.mintRateLimit, wrap(async (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').slice(0, 80);
+  const feedbackId = String(req.body?.feedbackId || '').toUpperCase().slice(0, 16);
+  const value = Number(req.body?.value);
+  if (!deviceId || !feedbackId) return bad(res, 400, 'deviceId and feedbackId required');
+  if (!Number.isInteger(value) || value < 1 || value > 5) return bad(res, 400, 'value must be 1..5');
+  const thread = await feedback.threadFor(deviceId, feedbackId);
+  if (!thread) return bad(res, 403, 'this feedback id does not belong to this device');
+  const existing = await Rating.findOne({ identity: feedbackId }).lean();
+  if (existing) {
+    const history = [...(existing.history || []), { value: existing.value, at: existing.at || existing.createdAt }].slice(-20);
+    await Rating.updateOne({ _id: existing._id }, { $set: { value, at: new Date(), history } });
+  } else {
+    await Rating.create({ identity: feedbackId, value, history: [] });
+  }
+  return ok(res, { ok: true, value });
+}));
+
+// THE OWN READ — the identity's current rating (the sheet's initial star state);
+// an unrated identity answers null honestly.
+api.get('/rating', wrap(async (req, res) => {
+  const deviceId = String(req.query?.deviceId || '').slice(0, 80);
+  const feedbackId = String(req.query?.feedbackId || '').toUpperCase().slice(0, 16);
+  if (!deviceId || !feedbackId) return bad(res, 400, 'deviceId and feedbackId required');
+  const thread = await feedback.threadFor(deviceId, feedbackId);
+  if (!thread) return bad(res, 403, 'this feedback id does not belong to this device');
+  const r = await Rating.findOne({ identity: feedbackId }).lean();
+  return ok(res, { ok: true, value: r ? r.value : null, at: r?.at || null });
+}));
+
+// THE PUBLIC AGGREGATE — the truth law: the real stored average, honestly rounded
+// to one decimal; an unrated world answers count 0 and NO average (never a zero
+// presented as a score, never a fabricated number).
+api.get('/meta/rating', wrap(async (_req, res) => {
+  const agg = await Rating.aggregate([{ $group: { _id: null, count: { $sum: 1 }, avg: { $avg: '$value' } } }]);
+  const count = agg[0]?.count || 0;
+  const average = count ? Math.round(agg[0].avg * 10) / 10 : null;
+  return ok(res, { count, average, at: new Date().toISOString() });
 }));
 
 api.get('/farm/:farmId/holds', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {

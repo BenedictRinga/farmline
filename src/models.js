@@ -557,6 +557,20 @@ const metaCounterSchema = new Schema({
   count: { type: Number, default: 0 },
 }, { timestamps: true });
 
+// ── RATINGS (Task 6, 2026-10-10 — the founder: "an intuitive ratings bar — Rate
+// Farmline, backend persisted, truthful, and live — inside the top section of the
+// Feedback chat interface, sticky"): ONE current rating per identity (the FL-
+// feedback id from Task 5's mint — the sheet's native identity), the latest wins;
+// the history is kept for the trend (capped). The aggregate (count + average) is
+// served at the public /meta/rating — the truth law: the real stored average,
+// honestly rounded; an unrated world answers count 0 and NO average.
+const ratingSchema = new Schema({
+  identity: { type: String, required: true, unique: true, index: true },
+  value: { type: Number, required: true, min: 1, max: 5 },
+  at: { type: Date, default: Date.now },
+  history: [{ value: { type: Number, min: 1, max: 5 }, at: { type: Date, default: Date.now } }],
+}, { timestamps: true });
+
 module.exports = {
   conn,
   migrateLegacyIndexes,
@@ -579,4 +593,5 @@ module.exports = {
   FeedbackChat: conn.model('FeedbackChat', feedbackChatSchema),
   FeedbackMsg: conn.model('FeedbackMsg', feedbackMsgSchema),
   MetaCounter: conn.model('MetaCounter', metaCounterSchema),
+  Rating: conn.model('Rating', ratingSchema),
 };

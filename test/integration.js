@@ -861,6 +861,65 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
       'the health answer carries visionCallsToday (the monitor reads it for free)');
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // § RATINGS (Task 6 — the founder: "Rate Farmline, backend persisted, truthful,
+  // and live"): one current rating per identity, the latest wins, the history for
+  // the trend; the aggregate is the REAL stored average, honestly rounded.
+  // BASELINE-AWARE: the smoke DB keeps rows between runs, so the assertions ride
+  // the delta (count/sum before vs after), never absolute numbers.
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== R. the ratings — persisted, latest wins, truthful aggregate ===');
+  {
+    const base = await req('GET', '/meta/rating');
+    const baseCount = Number(base.body?.count || 0);
+    const baseSum = Math.round((Number(base.body?.average) || 0) * baseCount * 10) / 10;
+
+    const rate1 = await req('POST', '/rating', { body: { deviceId: devA, feedbackId: fid, value: 4 } });
+    assert(rate1.status === 200 && rate1.body?.value === 4, `a rating lands (${rate1.status})`);
+    const agg1 = await req('GET', '/meta/rating');
+    assert(agg1.body?.count === baseCount + 1,
+      `the aggregate grew by exactly one (${agg1.body?.count} = ${baseCount} + 1)`);
+    const rate2 = await req('POST', '/rating', { body: { deviceId: devA, feedbackId: fid, value: 5 } });
+    assert(rate2.status === 200, `a re-tap updates (${rate2.status})`);
+    const agg2 = await req('GET', '/meta/rating');
+    assert(agg2.body?.count === baseCount + 1,
+      `the LATEST wins — the same identity still holds ONE row (${agg2.body?.count})`);
+    const myRating = await req('GET', `/rating?deviceId=${devA}&feedbackId=${fid}`);
+    assert(myRating.status === 200 && myRating.body?.value === 5,
+      `the identity's own current rating reads back as the latest (${myRating.body?.value})`);
+    const strangerRate = await req('POST', '/rating', { body: { deviceId: 'smoke-stranger-device', feedbackId: fid, value: 1 } });
+    assert(strangerRate.status === 403, `another device cannot rate for this identity (${strangerRate.status})`);
+    const badVal = await req('POST', '/rating', { body: { deviceId: devA, feedbackId: fid, value: 9 } });
+    assert(badVal.status === 400, `an out-of-range value is refused, never stored (${badVal.status})`);
+
+    // A SECOND identity rates 2 — the aggregate must be the real average of ALL
+    // current ratings: (baseSum + 5 + 2) / (baseCount + 2), honestly rounded.
+    const otherDev = 'smoke-device-r' + Date.now();
+    const otherMint = await req('POST', '/feedback/id', { body: { deviceId: otherDev } });
+    const otherId = otherMint.body?.feedbackId;
+    assert(!!otherId, 'the second identity mints');
+    const forged = await req('POST', '/rating', { body: { deviceId: otherDev, feedbackId: 'X-FORCE', value: 2 } });
+    assert(forged.status === 403, `a forged id cannot rate (${forged.status})`);
+    const rate3 = await req('POST', '/rating', { body: { deviceId: otherDev, feedbackId: otherId, value: 2 } });
+    assert(rate3.status === 200, `a second identity rates (${rate3.status})`);
+    const agg3 = await req('GET', '/meta/rating');
+    const expectCount = baseCount + 2;
+    const expectAvg = Math.round(((baseSum + 5 + 2) / expectCount) * 10) / 10;
+    assert(agg3.body?.count === expectCount && agg3.body?.average === expectAvg,
+      `the aggregate is the real stored average (count ${agg3.body?.count} = ${expectCount}, avg ${agg3.body?.average} = ${expectAvg})`);
+
+    // AN UNRATED identity answers null honestly — never a fabricated number.
+    const freshDev = 'smoke-unrated-' + Date.now();
+    const freshMint = await req('POST', '/feedback/id', { body: { deviceId: freshDev } });
+    assert(!!freshMint.body?.feedbackId, 'the third identity mints');
+    const unrated = await req('GET', `/rating?deviceId=${freshDev}&feedbackId=${freshMint.body.feedbackId}`);
+    assert(unrated.status === 200 && unrated.body?.value === null,
+      `an unrated identity reads null (${unrated.status}, value ${unrated.body?.value})`);
+    // AND the binding still guards the read: a stranger device gets the 403.
+    const strangerRead = await req('GET', `/rating?deviceId=smoke-stranger-device&feedbackId=${freshMint.body.feedbackId}`);
+    assert(strangerRead.status === 403, `a stranger's read of an id is refused (${strangerRead.status})`);
+  }
+
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('TEST CRASHED:', e); process.exit(1); });
