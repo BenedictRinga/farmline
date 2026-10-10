@@ -754,7 +754,7 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(noPhoto.status === 403 || noPhoto.status === 400, 'a junk body never reaches the compute');
   }
 
-  console.log('\n=== M6. the demo stays read-only at the estimated steps ===');
+  console.log('\n=== M6. the demo stays read-only — THE FULL WALK (A2: one middleware, every write) ===');
   {
     const demo = await req('POST', '/auth/demo', { body: {} });
     if (demo.status === 200 && demo.body?.token) {
@@ -762,18 +762,47 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
       const dfarm = dme.body?.farm;
       if (dfarm) {
         const dfarmId = dfarm._id || dfarm.id;
-        const dinv = await req('GET', `/farm/${dfarmId}/inventory`, { token: demo.body.token });
+        const dt = demo.body.token;
+        // THE WRITE WALL: every non-GET on the demo farm answers 403 — one
+        // middleware, so the wall holds for every route that exists and every
+        // route added tomorrow.
+        const wall = [
+          ['POST', `/farm/${dfarmId}/logs`],
+          ['POST', `/farm/${dfarmId}/plots`],
+          ['POST', `/farm/${dfarmId}/animals`],
+          ['POST', `/farm/${dfarmId}/groups`],
+          ['POST', `/farm/${dfarmId}/sellables`],
+          ['POST', `/farm/${dfarmId}/reverse-all`],
+          ['POST', `/farm/${dfarmId}/restore-all`],
+          ['POST', `/farm/${dfarmId}/money/mode`],
+          ['POST', `/farm/${dfarmId}/ladder/accept`],
+          ['PATCH', `/farm/${dfarmId}/profile`],
+          ['PATCH', `/farm/${dfarmId}/crops/x`],
+          ['DELETE', `/farm/${dfarmId}/crops/x`],
+        ];
+        for (const [m, path] of wall) {
+          const w = await req(m, path, { token: dt, body: {} });
+          assert(w.status === 403, `${m} ${path.replace(`/farm/${dfarmId}`, '')} is walled in the demo (${w.status})`);
+        }
+        // THE EXEMPTIONS SAID PLAINLY: the read surfaces and the visitor's walk.
+        const reads = await Promise.all([
+          req('GET', `/farm/${dfarmId}/today`, { token: dt }),
+          req('GET', `/farm/${dfarmId}/inventory`, { token: dt }),
+        ]);
+        assert(reads.every((r) => r.status === 200), `the demo READS still open (${reads.map((r) => r.status).join(',')})`);
+        // the estimated steps (the M6 walk, kept)
+        const dinv = reads[1];
         const demoCrop = (dinv.body?.plots || []).flatMap((p) => p.crops || [])
           .concat(dinv.body?.cropsWithoutPlot || [])
           .find((c) => (c.estimated || []).length > 0);
         if (demoCrop) {
           const evId = demoCrop.estimated[0].id;
-          const dc = await req('POST', `/farm/${dfarmId}/events/${evId}/confirm-estimated`, { token: demo.body.token, body: {} });
+          const dc = await req('POST', `/farm/${dfarmId}/events/${evId}/confirm-estimated`, { token: dt, body: {} });
           assert(dc.status === 403, `confirm is guarded in the demo (${dc.status})`);
-          const dd = await req('POST', `/farm/${dfarmId}/events/${evId}/dismiss-estimated`, { token: demo.body.token, body: {} });
+          const dd = await req('POST', `/farm/${dfarmId}/events/${evId}/dismiss-estimated`, { token: dt, body: {} });
           assert(dd.status === 403, `dismiss is guarded in the demo (${dd.status})`);
         } else {
-          warn('the demo\'s mid-season crop is not seeded yet — the demo-guard walk skipped this run');
+          warn('the demo\'s mid-season crop is not seeded yet — the estimate legs skipped this run');
         }
       } else {
         warn('demo /me did not resolve — the demo-guard walk skipped this run');

@@ -80,6 +80,33 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
 });
 const slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
 
+// ══════════════════════════════════════════════════════════════════════════════
+// A2: THE DEMO IMMUNITY, BY CONSTRUCTION (the GLM audit, 2026-10-10). ONE
+// router-level middleware — every farm-write path is guarded HERE, so a route
+// added tomorrow is guarded too; the per-route copies are deleted. The demo farm
+// is the sales window, not a sandbox: no non-GET reaches it.
+// THE EXEMPTIONS, SAID PLAINLY:
+//   · /vision + /vision/stage — the photo door is the VISITOR'S WALK (the demo
+//     exists to show the AI working; the spend is counted and capped).
+//   · /crops/preview — WRITES NOTHING (it computes the estimate the walk reads).
+//   · /orders/:id/stage — the buyer-flow artifact: the demo's order lifecycle is
+//     the commercial story the visitor is shown (order → deliver → paid).
+// Every other non-GET on the demo farm answers 403 with the honest sentence.
+// ══════════════════════════════════════════════════════════════════════════════
+api.use('/farm/:farmId', (req, res, next) => {
+  // NB: wrap() is a (req,res) shape — it has no next. This middleware is written
+  // plainly so `next` survives, with its own catch forwarding to Express.
+  (async () => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+    const p = req.path.replace(/\/+$/, '');
+    if (p === '/vision' || p === '/vision/stage' || p === '/crops/preview') return next();
+    if (/^\/orders\/[^/]+\/stage$/.test(p)) return next();
+    const farm = await Farm.findById(req.params.farmId).select('isDemo').lean();
+    if (farm?.isDemo) return bad(res, 403, 'In the demo this stays read-only — on your farm, this writes.');
+    return next();
+  })().catch(next);
+});
+
 // ── chat shapes ───────────────────────────────────────────────────────────────
 // Sent to the app rather than raw Mongo documents: `_id` as a string (the Angular
 // client treats it as an opaque id), and only the fields a thread needs. Never the
@@ -561,11 +588,8 @@ api.post('/farm/:farmId/plots', auth.requireAuth('farmer'), auth.requireFarmScop
 // the app on every boot — no extra fetch, nothing to go stale.
 api.post('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const { photo } = req.body || {};
-  // THE DEMO WEARS HER FOUNDER'S PHOTOGRAPH (2026-10-09, the founder: the ×
-  // removed it and it never returned until the next reseed — and a visitor's
-  // upload persisted for every later visitor). The demo farm's face is immutable.
-  const _farm = await Farm.findById(req.params.farmId).select('isDemo').lean();
-  if (_farm?.isDemo) return bad(res, 403, 'The demo wears its own photograph — nothing to change here');
+  // THE DEMO WEARS HER FOUNDER'S PHOTOGRAPH (2026-10-09): guarded at the router
+  // level now (A2 — the demo immunity is by construction).
 
   if (typeof photo !== 'string' || !/^data:image\/(jpeg|png);base64,/.test(photo)) {
     return bad(res, 400, 'photo must be a base64 JPEG or PNG data URL');
@@ -576,12 +600,8 @@ api.post('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScop
 }));
 
 api.delete('/farm/:farmId/photo', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
-  // THE DEMO WEARS HER FOUNDER'S PHOTOGRAPH (2026-10-09, the founder: the ×
-  // removed it and it never returned until the next reseed — and a visitor's
-  // upload persisted for every later visitor). The demo farm's face is immutable.
-  const _farm = await Farm.findById(req.params.farmId).select('isDemo').lean();
-  if (_farm?.isDemo) return bad(res, 403, 'The demo wears its own photograph — nothing to change here');
-
+  // THE DEMO WEARS HER FOUNDER'S PHOTOGRAPH (2026-10-09): guarded at the router
+  // level now (A2 — the demo immunity is by construction).
   await Farm.updateOne({ _id: req.params.farmId }, { $set: { photo: '' } });
   return ok(res, { saved: true });
 }));
@@ -637,14 +657,9 @@ api.post('/farm/:farmId/crops/preview', auth.requireAuth('farmer'), auth.require
 api.post('/farm/:farmId/crops', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const { plotId = null, crop, variety = '', acres = 0, season = '', plantedOn = null, fodderFor = '' } = req.body || {};
   if (!crop) return bad(res, 400, 'crop required');
-  // THE DEMO WEARS ITS OWN FIELDS (the photo-guard pattern, 2026-10-09): the
-  // mid-season door is a NEW WRITE SURFACE, and Kimani Farms is shared by every
-  // visitor — a visitor's entry would plant a crop into the fiction. The demo
-  // stays read-only here and says so. (Pre-existing note for the magister: the
-  // plots and groups routes predate the demo and carry no guard — flagged in the
-  // thread report, not silently changed here.)
-  const _demoFarm = await Farm.findById(req.params.farmId).select('isDemo').lean();
-  if (_demoFarm?.isDemo) return bad(res, 403, 'In the demo this stays read-only — on your farm, this writes.');
+  // THE DEMO WEARS ITS OWN FIELDS: guarded at the router level now (A2 — the demo
+  // immunity is by construction; the plots/groups note this comment carried is
+  // cured by the same middleware).
   const entry = String(req.body?.entry || 'planting');
 
   // ── THE THREE ENTRIES (the mid-season door, 2026-10-09) ──
@@ -1343,18 +1358,12 @@ api.post('/farm/:farmId/events/:eventId/complete', auth.requireAuth('farmer'), a
 // runs the normal completion machinery (record + hold + next occurrence) and the
 // record SAYS it was confirmed from an estimate. Dismiss deletes the event —
 // zero trace in the ledgers or the records.
-// THE DEMO GUARD (the photo-guard pattern): Kimani Farms is shared by every
-// visitor, so a visitor's confirm/dismiss would write into the fiction. The demo
-// stays read-only here, and says so.
-function demoGuard(farm) {
-  return farm?.isDemo ? { ok: false, status: 403, error: 'In the demo this stays read-only — on your farm, this writes.' } : { ok: true };
-}
+// THE DEMO GUARD: now at the router level (A2 — the demo immunity is by
+// construction; the demoGuard copies are retired).
 
 api.post('/farm/:farmId/events/:eventId/confirm-estimated', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const farm = await Farm.findById(req.params.farmId);
   if (!farm) return bad(res, 404, 'farm not found');
-  const g = demoGuard(farm);
-  if (!g.ok) return bad(res, g.status, g.error);
   const ev = await ScheduledEvent.findOne({ _id: req.params.eventId, farmId: req.params.farmId }).lean();
   if (!ev) return bad(res, 404, 'event not found');
   if (ev.status !== 'estimated') return bad(res, 409, 'only an estimated step can be confirmed here');
@@ -1372,8 +1381,6 @@ api.post('/farm/:farmId/events/:eventId/confirm-estimated', auth.requireAuth('fa
 api.post('/farm/:farmId/events/:eventId/dismiss-estimated', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const farm = await Farm.findById(req.params.farmId).select('isDemo').lean();
   if (!farm) return bad(res, 404, 'farm not found');
-  const g = demoGuard(farm);
-  if (!g.ok) return bad(res, g.status, g.error);
   // ZERO TRACE: the document is removed, not flagged. No Log, no Hold, no
   // record of any kind was ever written for a dismissed estimate, and now the
   // question itself is gone too. materialise() will not resurrect it unless the
