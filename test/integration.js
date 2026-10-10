@@ -964,6 +964,42 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   }
 
   // ════════════════════════════════════════════════════════════════════════════
+  // § C — the enhancements that shipped with the audit sweep: the price
+  // intelligence routes (C5), the per-farm OG data (C2), the fabricated trust
+  // exposure REMOVED (C6), the robots.txt ask recorded in the report (C3).
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n=== C. the price intelligence + the per-farm OG + the trust truth ===');
+  {
+    // A THROWAWAY PRODUCT NAME: the price aggregate is global, so leftovers from
+    // any earlier smoke run would poison the counts — the leg posts under a name
+    // only this run created and asserts on exactly its own rows.
+    const smokeProduct = 'smoke-milk-' + Date.now();
+    const p1 = await req('POST', `/farm/${farmId}/prices`, { token, body: { product: smokeProduct, price: 60, unit: 'litre', market: 'Eldoret' } });
+    assert(p1.status === 200, `a farmer's price report lands (${p1.status})`);
+    const p2 = await req('POST', `/farm/${farmId}/prices`, { token, body: { product: smokeProduct, price: 70, unit: 'litre', market: 'Eldoret' } });
+    assert(p2.status === 200, 'a second report lands');
+    const thin = await req('GET', `/meta/prices?product=${smokeProduct}`);
+    assert(thin.status === 200 && thin.body?.prices?.[0]?.count === 2, `the aggregate counts the reports (${thin.body?.prices?.[0]?.count})`);
+    assert(thin.body.prices[0].average === null, 'an average with fewer than 3 reports is NOT shown (the no-assurance law)');
+    await req('POST', `/farm/${farmId}/prices`, { token, body: { product: smokeProduct, price: 80, unit: 'litre', market: 'Eldoret' } });
+    const ready = await req('GET', `/meta/prices?product=${smokeProduct}`);
+    assert(ready.body?.prices?.[0]?.average === 70, `the average shows once the crowd exists (${ready.body?.prices?.[0]?.average})`);
+    assert(ready.body.prices[0].low === 60 && ready.body.prices[0].high === 80, `the range is honest (${ready.body.prices[0].low}–${ready.body.prices[0].high})`);
+    const badPrice = await req('POST', `/farm/${farmId}/prices`, { token, body: { product: 'milk', price: -5 } });
+    assert(badPrice.status === 400, `a negative price is refused (${badPrice.status})`);
+    const noProduct = await req('POST', `/farm/${farmId}/prices`, { token, body: { price: 50 } });
+    assert(noProduct.status === 400, 'a price with no product is refused');
+    // C2: the per-farm OG data
+    const og = await req('GET', `/og/s/${slug}`);
+    assert(og.status === 200 && og.body?.og?.url?.includes(`/farmline/s/${slug}`), `the per-farm OG carries the shop URL (${og.status})`);
+    const ogMiss = await req('GET', '/og/s/no-such-slug');
+    assert(ogMiss.status === 404, 'an unknown slug is a 404');
+    // C6: the fabricated trust is GONE from the public read
+    const pub = await req('GET', `/shop/${slug}`);
+    assert(pub.status === 200 && !('trust' in (pub.body?.farm || {})), `publicFarm no longer carries the fabricated trust (${Object.keys(pub.body?.farm || {}).join(',')})`);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
   // § AUTH (A4 — the fail-fast): production without AUTH_SECRET is CLOSED (503 on
   // every gated route), while the development grace still admits the dev
   // principal. Verified in a CHILD PROCESS (auth.js caches the secret at require

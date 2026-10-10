@@ -26,11 +26,14 @@ const oid = (v) => new mongoose.Types.ObjectId(String(v));
 /** The ONLY Farm fields a customer may ever receive. Adding to this list is a
  *  deliberate act; forgetting to add a field fails closed. */
 const CUSTOMER_FARM_FIELDS = [
-  'name', 'slug', 'area', 'county', 'story', 'photos', 'verifiedFarm', 'terms', 'slots', 'trust',
+  // C6: 'trust' REMOVED from the allowlist — the derived signals are not built
+  // yet, so the field carried only the schema's fabricated defaults (see
+  // publicFarm below). It returns when the derivation exists.
+  'name', 'slug', 'area', 'county', 'story', 'photos', 'verifiedFarm', 'terms', 'slots',
   // ROUND A (the buyer's guide): `photo` is THE FARM'S FACE — the one hero
-  // photograph the farmer uploaded (build 16). The trust layer's first movement
-  // is the photograph, and until now the buyer never received it: the allowlist
-  // carried the old Photo Kit array only. One field opens; nothing else does.
+  // photograph the farmer uploaded (build 16). The photograph is the trust
+  // layer's first movement, and until now the buyer never received it: the
+  // allowlist carried the old Photo Kit array only. One field opens; nothing else does.
   'photo',
 ];
 
@@ -39,14 +42,13 @@ function publicFarm(farm) {
   if (!farm) return null;
   const out = {};
   for (const k of CUSTOMER_FARM_FIELDS) out[k] = farm[k];
-  // Trust signals are safe and are the customer's main reassurance — but only the
-  // aggregated ones. Never the raw counts behind them.
-  out.trust = {
-    withdrawalAdherence: farm?.trust?.withdrawalAdherence ?? 1,
-    vaccinationsCurrent: !!farm?.trust?.vaccinationsCurrent,
-    responseRate: farm?.trust?.responseRate ?? 0,
-    ordersFulfilled: farm?.trust?.ordersFulfilled ?? 0,
-  };
+  // C6 (the GLM audit, 2026-10-10): trust signals are NOT exposed at all until
+  // they are COMPUTED. The schema defaults (adherence 1, rates 0) rode through
+  // `?? 1` and a farm with zero records shipped a perfect adherence score to
+  // every buyer — the no-assurance register is a standing law. Nothing in the
+  // buyer face reads these fields today, so removing the exposure touches no
+  // display; when the nightly derivation job exists, restore this block carrying
+  // ONLY computed values, absent when nothing real stands behind them.
   return out;
 }
 

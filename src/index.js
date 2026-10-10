@@ -1598,6 +1598,85 @@ api.get('/meta/rating', wrap(async (_req, res) => {
   return ok(res, { count, average, at: new Date().toISOString() });
 }));
 
+// ══════════════════════════════════════════════════════════════════════════════
+// C5: THE PRICE INTELLIGENCE — PriceObservation was modelled but NO ROUTE wrote
+// or read it, so the market-intelligence rung was data-model-only. Two doors:
+//   · POST /farm/:farmId/prices — the farmer reports what their product really
+//     sold for (source 'farmer'; the tap is the action; the mint valve).
+//   · GET /meta/prices?product= — the PUBLIC aggregate (count, average, low, high,
+//     the last observed) over the last 30 days for one product, or the top
+//     products when none is named. Averages carry their count — a number with no
+//     crowd behind it is not shown (the no-assurance law).
+// ══════════════════════════════════════════════════════════════════════════════
+api.post('/farm/:farmId/prices', auth.requireAuth('farmer'), auth.requireFarmScope, auth.mintRateLimit, wrap(async (req, res) => {
+  const product = String(req.body?.product || '').trim().toLowerCase().slice(0, 40);
+  const price = Number(req.body?.price);
+  if (!product) return bad(res, 400, 'the product is required');
+  if (!Number.isFinite(price) || price <= 0) return bad(res, 400, 'the price must be a positive number');
+  const obs = await PriceObservation.create({
+    farmId: req.params.farmId,
+    product,
+    unit: String(req.body?.unit || '').slice(0, 12),
+    price,
+    market: String(req.body?.market || '').slice(0, 60),
+    source: 'farmer',
+  });
+  return ok(res, { price: { id: String(obs._id), product: obs.product, price: obs.price, at: obs.observedAt } });
+}));
+
+api.get('/meta/prices', wrap(async (req, res) => {
+  const product = String(req.query?.product || '').trim().toLowerCase();
+  const since = new Date(Date.now() - 30 * 86400000);
+  const match = product ? { product, observedAt: { $gte: since } } : { observedAt: { $gte: since } };
+  const group = product ? null : '$product';
+  const agg = await PriceObservation.aggregate([
+    { $match: match },
+    { $group: {
+      _id: group,
+      count: { $sum: 1 },
+      average: { $avg: '$price' },
+      low: { $min: '$price' },
+      high: { $max: '$price' },
+      last: { $max: '$observedAt' },
+      unit: { $first: '$unit' },
+    } },
+    { $sort: { count: -1 } },
+    { $limit: product ? 1 : 20 },
+  ]);
+  const round = (n) => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
+  const shape = (r) => r && ({
+    product: r._id || product,
+    count: r.count,
+    // An average stands only when a crowd stands behind it.
+    average: r.count >= 3 ? round(r.average) : null,
+    low: round(r.low), high: round(r.high),
+    unit: r.unit || '', last: r.last,
+  });
+  return ok(res, { prices: product ? (agg[0] ? [shape(agg[0])] : []) : agg.map(shape) });
+}));
+
+// ══════════════════════════════════════════════════════════════════════════════
+// C2 (the server face): THE PER-FARM OG DATA — the one JSON a per-farm share
+// card needs, public, keyed by the shop slug. The card itself needs an nginx
+// rewrite to feed crawler UAs this JSON (the requested diff is in the thread
+// report); until that lands, the app shares the honest static card and this
+// route carries the truth for the day the plumbing arrives.
+// ══════════════════════════════════════════════════════════════════════════════
+api.get('/og/s/:slug', wrap(async (req, res) => {
+  const farm = await Farm.findOne({ slug: String(req.params.slug || '').toLowerCase() }).lean();
+  if (!farm) return bad(res, 404, 'no such farm');
+  const shelf = await projection.buildAvailability(String(farm._id));
+  return ok(res, {
+    og: {
+      title: `${farm.name} — fresh from the farm`,
+      description: farm.story || 'Order straight from a real smallholder farm.',
+      image: farm.photo || '',
+      url: `${config.publicUrl}${config.basePath}/s/${farm.slug}`,
+      products: (Array.isArray(shelf) ? shelf : []).filter((i) => i.qty > 0).length,
+    },
+  });
+}));
+
 api.get('/farm/:farmId/holds', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   return ok(res, { holds: await projection.activeHolds(req.params.farmId) });
 }));

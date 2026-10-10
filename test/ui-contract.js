@@ -145,8 +145,12 @@ function need(label, obj, fields) {
   // ── the customer face, exactly as the app reads it ─────────────────────────
   const shop = await call('GET', `/shop/${slug}`);
   need('GET /shop/:slug (no auth)', shop.body, ['ok', 'farm', 'availability', 'records', 'moneyMode']);
-  need('  .farm', shop.body?.farm, ['name', 'area', 'trust', 'terms', 'slots', 'photo']);
-  need('  .farm.trust', shop.body?.farm?.trust, ['ordersFulfilled', 'withdrawalAdherence']);
+  need('  .farm', shop.body?.farm, ['name', 'area', 'terms', 'slots', 'photo']);
+  // C6 (the GLM audit, 2026-10-10): the trust fields LEFT the contract BY DESIGN —
+  // the derived signals are not built, so the API stopped sending fabricated
+  // defaults (a zero-record farm shipped a perfect adherence score). The buyer
+  // face never rendered them. They return to this contract only when a real
+  // derivation exists.
   need('  .availability[0]', shop.body?.availability?.[0], ['product', 'label', 'unit', 'price', 'qty', 'available']);
   // ROUND A — the buyer's guide: the farm's face rides the payload, and the
   // readable records carry the numbers the app renders. This farm logged milk
