@@ -148,6 +148,11 @@ function publicShape() {
     // provisional rung it opens stands.
     visionZu: VISION_ZU,
     provisionalDays: PROVISIONAL_DAYS,
+    // RULING 1 (the founder, 2026-10-12): the vision tier is a STANDALONE
+    // SERVICE — the free monthly allowance, then the per-use ZU. The mid-season
+    // insight keeps its own VISION_ZU price above.
+    visionFreeMonthly: Number(require('./config').envVar('FARMLINE_VISION_FREE_MONTHLY', '5')) || 5,
+    visionPerUseZU: Number(require('./config').envVar('FARMLINE_VISION_PER_USE_ZU', '2')) || 2,
     note: '1 ZU is one US cent. Packs never expire. Farmline sells only ZU — we never handle money between a farmer and a buyer.',
   };
 }

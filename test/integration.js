@@ -782,12 +782,19 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
       'the classic planting path is byte-identical in behavior (no estimate flag)');
   }
 
-  console.log('\n=== M5. Door 2 — the vision gate is honest ===');
+  console.log('\n=== M5. Door 2 — the vision gate is honest (RULING 1: the tier is GRANTED at registration) ===');
   {
-    const vis = await req('POST', `/farm/${farmId}/vision/stage`, { token, body: { photo: 'data:image/jpeg;base64,AAAA' } });
-    assert(vis.status === 403, `the entitlement gate holds on a non-advanced farm (${vis.status})`);
+    // RULING 1 (the founder, 2026-10-12): the tier is granted at registration —
+    // safe because the tier opens the SERVICE (the free monthly allowance, then
+    // ZU) and never moves the effective rung. So a fresh registered farm walks
+    // PAST the old 403 tier gate, and the meter fields ride /me with the farm.
+    const me5 = await req('GET', '/me', { token });
+    assert(me5.body?.farm?.visionTier === 'advanced', `the registration grant carries the tier (${me5.body?.farm?.visionTier})`);
+    assert(me5.body?.farm?.visionUsedThisMonth === 0, `the allowance meter starts at zero (${me5.body?.farm?.visionUsedThisMonth})`);
+    // A junk body is judged at the PHOTO step (the photo-first law) — past the
+    // tier gate now, still never reaching the compute.
     const noPhoto = await req('POST', `/farm/${farmId}/vision/stage`, { token, body: { photo: 'hello' } });
-    assert(noPhoto.status === 403 || noPhoto.status === 400, 'a junk body never reaches the compute');
+    assert(noPhoto.status === 400, `a junk body never reaches the compute (${noPhoto.status})`);
   }
 
   console.log('\n=== M6. the demo stays read-only — THE FULL WALK (A2: one middleware, every write) ===');

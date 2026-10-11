@@ -73,6 +73,13 @@ const farmSchema = new Schema({
   // the vision compute lands (a later ladder), 'advanced' unlocks it.
   visionTier: { type: String, enum: ['none', 'advanced'], default: 'none' },
 
+  // RULING 1 (the founder, 2026-10-12): the tier is a STANDALONE SERVICE with a
+  // FREE MONTHLY ALLOCATION — these two carry the meter (the EAT month key +
+  // the used count; see src/index.js visionAllowanceState). The tier itself
+  // NEVER moves the effective rung — ladder.effectiveRung never reads it.
+  visionUsedThisMonth: { type: Number, default: 0 },
+  visionMonthKey: { type: String, default: '' },
+
   // THE LIVING DEMO (the founder, 2026-10-08: "people need to SEE"): exactly
   // one farm carries isDemo:true — the demo login route issues a REAL farmer
   // token for it (no secrets on the wire; the farm holds only fictional data

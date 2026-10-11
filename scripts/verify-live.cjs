@@ -50,6 +50,7 @@ async function get(url, opts = {}) {
   // ── 1. the API answers JSON, not the shell ─────────────────────────────────
   console.log('api');
   const ver = await get(`${BASE}/api/farmline/version`);
+  let verBuild = 0;
   if (ver.status !== 200) {
     bad(`/api/farmline/version → ${ver.status}${ver.error ? ' (' + ver.error + ')' : ''}`);
   } else {
@@ -60,9 +61,15 @@ async function get(url, opts = {}) {
         + 'The generic `location /` is answering with the app shell at HTTP 200 (a success status for a failed call).');
     } else {
       ok(`/api/farmline/version → JSON (version ${j.version}, build ${j.build})`);
-      j.build === LOCAL_BUILD
-        ? ok(`live build ${j.build} matches local build ${LOCAL_BUILD}`)
-        : bad(`DEPLOY DRIFT — live build ${j.build}, local build ${LOCAL_BUILD}. The deploy did not take.`);
+      verBuild = Number(j.build) || 0;
+      // B1: /version reads the SERVED APP BUNDLE now — the app's stamp is the
+      // app's counter, the SERVER's package.json is the server's own cadence.
+      // Comparing either to this repo's counter is a cross-repo category error
+      // (the founder's deploy bumps live on their machine and the droplet). The
+      // honest consistency check: /version must agree with /farmline/build.json —
+      // the SAME clock, asserted below in the update-truth section. Here we only
+      // report what the world is running.
+      info(`the served app bundle is build ${j.build} (the app's own counter — the server's package.json counter is a separate cadence)`);
     }
   }
 
@@ -74,13 +81,25 @@ async function get(url, opts = {}) {
   let hj = null;
   try { hj = JSON.parse(health.body); } catch { /* not json */ }
   if (hj?.ok) {
-    ok(`/api/farmline/health → db=${hj.db} dbName=${hj.dbName} auth=${hj.authArmed ? 'ARMED' : 'OPEN'}`);
+    // A4: authArmed left the PUBLIC /health by design — a server must not
+    // advertise its own disarmament. The ARM state is probed honestly below:
+    // an unauthenticated hit at a gated route answers 401 when armed, 503 when
+    // the production server is keyless (the fail-closed law).
+    ok(`/api/farmline/health → db=${hj.db} dbName=${hj.dbName}`);
     if (hj.dbName !== 'farmline') bad(`the server is on database "${hj.dbName}", not "farmline"`);
-    if (!hj.authArmed) bad('the write gate is OPEN on a public host (AUTH_SECRET unset)');
-    if (hj.build && hj.build !== LOCAL_BUILD) bad(`health reports build ${hj.build}, local is ${LOCAL_BUILD}`);
+    if (typeof hj.visionCallsToday === 'number') info(`the demo vision spend today: ${hj.visionCallsToday}`);
+    if (typeof hj.errors5xxToday === 'number') info(`5xx so far today: ${hj.errors5xxToday}`);
   } else {
     bad(`/api/farmline/health → ${health.status} (expected JSON). Is the API proxied?`);
   }
+
+  // THE ARM PROBE (A4's public face): a gated route, no token. ARMED = 401 (the
+  // gate verified and refused). NOT ARMED = 503 (the fail-closed law). A 404 or
+  // an HTML body means the proxy lost the route — the old shell lie.
+  const armProbe = await get(`${BASE}/api/farmline/farm/abc/inventory`);
+  if (armProbe.status === 401) ok('the write gate is ARMED (an unauthenticated probe is refused 401)');
+  else if (armProbe.status === 503) bad('the write gate is CLOSED — the production server has no AUTH_SECRET (every gated route refuses 503)');
+  else bad(`the write-gate probe answered ${armProbe.status} (expected 401 armed / 503 not armed)`);
 
   // ── 2. a missing API path must be a REAL 404, never the shell ──────────────
   const missing = await get(`${BASE}/api/farmline/this-route-does-not-exist`);
@@ -178,6 +197,11 @@ async function get(url, opts = {}) {
     const cacheHeader = String((stamp.headers && stamp.headers.get ? stamp.headers.get('cache-control') : (stamp.headers || {})['cache-control']) || '');
     if (stamp.status === 200 && sj && Number(sj.build) > 0) {
       ok(`/farmline/build.json → build ${sj.build} (@${String(sj.commit || '').slice(0, 7)})`);
+      // THE SAME-CLOCK CHECK (B1): /version now reads THIS bundle's stamp —
+      // the two answers must AGREE, or the server is reading a stale/wrong file.
+      verBuild === Number(sj.build)
+        ? ok(`the same clock: /version (${verBuild}) and build.json (${sj.build}) agree`)
+        : bad(`THE CLOCKS DISAGREE — /version reads ${verBuild}, build.json reads ${sj.build}; /version is not reading the served bundle`);
       // THE LOOPKEEPER TRUTH (2026-10-09): the check composes the SERVER's
       // version (0.1.<serverBuild>) and compares it to the client's STORED
       // version — the served bundle's build.json is the APP's stamp, a

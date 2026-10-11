@@ -100,6 +100,14 @@ const config = {
   // the wall. Per EAT day, keyed on the client IP.
   visionIpDailyCap: Number(envVar('FARMLINE_VISION_IP_DAILY_CAP', '10')) || 10,
 
+  // RULING 1 (the founder, 2026-10-12): the vision tier is a STANDALONE SERVICE
+  // with a FREE MONTHLY ALLOCATION (default 5 assessments/month per farm) beyond
+  // which each assessment costs ZU at the per-use price (default 2). The
+  // mid-season insight keeps its OWN product price (zu.VISION_ZU = 5) — never
+  // merged into the per-use meter.
+  visionFreeMonthly: Number(envVar('FARMLINE_VISION_FREE_MONTHLY', '5')) || 5,
+  visionPerUseZU: Number(envVar('FARMLINE_VISION_PER_USE_ZU', '2')) || 2,
+
   /** Admin gate — same shape as rolodex-server's config.checkAdminKey. */
   checkAdminKey(key) {
     const expected = envVar('FARMLINE_ADMIN_KEY');

@@ -300,6 +300,11 @@ api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
     // No money-mode is set at birth any more (2026-10-11): the virtual/mpesa
     // toggle belonged to the deleted rail. A new farm starts on the free rungs
     // with a zero ZU balance, which is the honest starting state.
+    // RULING 1 (the founder, 2026-10-12): the vision tier is GRANTED at
+    // registration — safe under the allocation law, because the tier opens the
+    // SERVICE (the free monthly allowance, then ZU) and can never move the
+    // effective rung (ladder.effectiveRung never reads it).
+    visionTier: 'advanced',
   });
   const { salt, hash } = auth.hashPin(pin);
   const member = await Member.create({ farmId: farm._id, phone: String(phone), name, role: 'owner', pinSalt: salt, pinHash: hash });
@@ -535,6 +540,76 @@ api.patch('/farm/:farmId/profile', auth.requireAuth('farmer'), auth.requireFarmS
 const visionBody = express.json({ limit: '4mb' });
 const visionIpKey = (req) => 'vision-ip-' + require('crypto').createHash('sha256').update(auth.clientIp(req)).digest('hex').slice(0, 16);
 
+// ═══ RULING 1 — THE VISION-TIER FREE ALLOCATION (the founder, 2026-10-12) ════
+// The tier is a STANDALONE SERVICE: a free monthly allowance of vision
+// assessments per farm (FARMLINE_VISION_FREE_MONTHLY, default 5), beyond which
+// each assessment costs ZU. THE MONTH KEY IS EAT (+3h — the same clock the
+// metacounter's day key uses), so the allocation turns over at midnight East
+// Africa time, the working month the founder counts.
+// THE TWO PRICES, said plainly: the mid-season insight KEEPS ITS OWN PRODUCT
+// (zu.VISION_ZU = 5 — the 2026-10-11 "both" ruling's product, never merged);
+// the general door charges the STANDALONE per-use price (default 2). Under the
+// allowance BOTH doors are free — the free access is the tier's.
+// THE DEMO: never counted, never charged — the visitor's walk is free forever.
+const eatMonthKey = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 7);
+
+async function visionAllowanceState(farm) {
+  const monthKey = eatMonthKey();
+  const used = farm.visionMonthKey === monthKey ? (Number(farm.visionUsedThisMonth) || 0) : 0;
+  const freeLimit = config.visionFreeMonthly;
+  return { used, freeLimit, monthKey, freeLeft: Math.max(0, freeLimit - used) };
+}
+
+/** Consume one allowance slot (or roll the month over). The increment fires
+ *  when the key already matches; the reset+set covers a new (or first) month. */
+async function consumeVisionAllowance(farmId, monthKey) {
+  const inc = await Farm.updateOne({ _id: farmId, visionMonthKey: monthKey }, { $inc: { visionUsedThisMonth: 1 } });
+  if (!inc.modifiedCount) {
+    await Farm.updateOne({ _id: farmId, visionMonthKey: { $ne: monthKey } }, { $set: { visionMonthKey: monthKey, visionUsedThisMonth: 1 } });
+  }
+}
+
+/** THE ANSWER'S BILL — the allowance first (a free assessment consumes a slot),
+ *  the door's own price beyond it. Called ONLY after the model has answered:
+ *  a 502 bills nothing (the standing gate-on-success law). Idempotent within
+ *  one request — never twice. */
+async function billVisionAnswer(req, farm, route) {
+  if (req._visionBill) return req._visionBill;
+  const price = route === 'stage' ? zu.VISION_ZU : config.visionPerUseZU;
+  if (farm?.isDemo) {
+    req._visionBill = { charged: 0, zuCharged: 0, demo: true, used: 0, freeLimit: 0 };
+    return req._visionBill;
+  }
+  const al = await visionAllowanceState(farm);
+  let bill;
+  if (al.freeLeft > 0) {
+    await consumeVisionAllowance(farm._id, al.monthKey).catch(() => null);
+    bill = { charged: 0, zuCharged: 0, used: al.used + 1, freeLimit: al.freeLimit };
+  } else {
+    const r = await money.spend({
+      farmId: farm._id, amountZU: price, ref: 'vision',
+      note: route === 'stage' ? 'mid-season insight' : 'AI vision assessment',
+    });
+    bill = r.ok
+      ? { charged: price, zuCharged: price, used: al.used, freeLimit: al.freeLimit, balance: r.balance }
+      : { charged: 0, zuCharged: 0, used: al.used, freeLimit: al.freeLimit, uncharged: true };
+  }
+  req._visionBill = bill;
+  return bill;
+}
+
+/** The refusal body when the allowance is out AND the balance is short — the
+ *  farmer is told exactly where she stands and what to do about it. */
+function visionPaymentRefused(res, route, afford, al) {
+  const price = route === 'stage' ? zu.VISION_ZU : config.visionPerUseZU;
+  return res.status(402).json({
+    ok: false,
+    error: `this assessment costs ${price} ZU and the farm holds ${afford.have} — the free monthly allowance (${al.freeLimit}) is used; collect today's free ZU, or top up with a pack`,
+    needed: afford.needed, have: afford.have, short: afford.short,
+    suggestedPack: afford.suggestedPack, used: al.used, freeLimit: al.freeLimit,
+  });
+}
+
 api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const cap = config.visionIpDailyCap;
   const ipKey = visionIpKey(req);
@@ -550,16 +625,13 @@ api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.re
     // other benefits riding it, so even an API-level arrival learns the wall.
     return bad(res, 403, 'AI Vision is part of the Advanced package — the commercial rungs, with the AI diagnosis, the market intelligence and the priority support (see the ladder)');
   }
-  // THE PRICE OF THE INSIGHT — checked BEFORE the model call, so we never do work we
-  // cannot bill for, and a short farm is told exactly what to do about it. (Free-text
-  // door, same price as the photo door: one model call, one value.)
-  const afford = await visionAffordable(req, res, farm);
-  if (!afford.ok) {
-    return res.status(402).json({
-      ok: false,
-      error: `this insight costs ${zu.VISION_ZU} ZU and the farm holds ${afford.have} — collect today's free ZU, or top up with a pack`,
-      needed: afford.needed, have: afford.have, short: afford.short, suggestedPack: afford.suggestedPack,
-    });
+  // THE PRICE OF THE INSIGHT — RULING 1: the allowance FIRST (a free assessment
+  // needs no balance), the general door's OWN price (the per-use ZU) beyond it —
+  // checked BEFORE the model call, so we never do work we cannot bill for.
+  const al = await visionAllowanceState(farm);
+  if (!farm.isDemo && al.freeLeft <= 0) {
+    const afford = await visionAffordable(req, res, farm, config.visionPerUseZU);
+    if (!afford.ok) return visionPaymentRefused(res, 'general', afford, al);
   }
   const b = req.body || {};
   // THE PHOTO FIRST: a body the farmer can fix is judged before the key she
@@ -608,16 +680,21 @@ api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.re
     if (farm.isDemo) { try { await metacounter.bump('vision-demo'); } catch { /* the counter never blocks the answer */ } }
     // B7: the caller's own daily cap counts the same successful answer.
     try { await metacounter.bump(ipKey); } catch { /* never blocks */ }
-    // THE INSIGHT IS PAID (the founder, 2026-10-11: "I do want it paid for"). Charged
-    // HERE, after the model has answered — a 502 above bills nothing. The free-text
-    // door carries the same price as the photo door: one model call, one value.
-    const charged = await chargeVision(req, farm);
+    // THE INSIGHT IS PAID (the founder, 2026-10-11: "I do want it paid for").
+    // RULING 1 (2026-10-12) reshapes the bill: the monthly allowance first —
+    // a free assessment consumes a slot — then the general door's per-use ZU.
+    // Charged HERE, after the model has answered — a 502 above bills nothing.
+    const bill = await billVisionAnswer(req, farm, 'general');
     return ok(res, {
       insight,
-      charged: charged.charged,
-      demo: !!charged.demo,
-      balance: charged.balance,
-      bought: 'insight',
+      allowed: true,
+      used: bill.used,
+      freeLimit: bill.freeLimit,
+      charged: bill.charged,
+      zuCharged: bill.zuCharged,
+      demo: !!bill.demo,
+      balance: bill.balance,
+      bought: 'assessment',
     });
   } catch (e) {
     console.warn('[farmline] vision error:', e.message);
@@ -634,26 +711,21 @@ api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.re
  *   · refusal happens BEFORE the model call, and the charge lands only when the model
  *     has actually ANSWERED. A 502 bills nothing (the standing rule: gate on success).
  */
-async function visionAffordable(req, res, farm) {
+async function visionAffordable(req, res, farm, amountZU = zu.VISION_ZU) {
+  // RULING 1: the price is the CALLER's door — the general door's per-use ZU or
+  // the stage door's own VISION_ZU (its own product, never merged).
   if (farm?.isDemo) return { ok: true, demo: true, have: 0 };
   const have = await money.balance({ farmId: req.params.farmId });
-  if (have < zu.VISION_ZU) {
-    const short = zu.VISION_ZU - have;
-    return { ok: false, have, needed: zu.VISION_ZU, short, suggestedPack: zu.packFor(short) };
+  if (have < amountZU) {
+    const short = amountZU - have;
+    return { ok: false, have, needed: amountZU, short, suggestedPack: zu.packFor(short) };
   }
   return { ok: true, have };
 }
 
-/** Charge AFTER the model answered. Idempotent within one request — never twice. */
-async function chargeVision(req, farm) {
-  if (req._zuVision) return req._zuVision;
-  if (farm?.isDemo) { req._zuVision = { charged: 0, demo: true }; return req._zuVision; }
-  const r = await money.spend({
-    farmId: req.params.farmId, amountZU: zu.VISION_ZU, ref: 'vision', note: 'AI vision call',
-  });
-  req._zuVision = r.ok ? { charged: zu.VISION_ZU, balance: r.balance } : { charged: 0, uncharged: true };
-  return req._zuVision;
-}
+/** chargeVision RETIRED (Ruling 1, 2026-10-12): its job — the flat 5-ZU charge
+ *  after an answered call — is now billVisionAnswer's allowance-first ladder.
+ *  Nothing called it but the two vision routes; both moved. */
 
 /**
  * THE PROVISIONAL RUNG — the second half of the mid-season door.
@@ -701,15 +773,15 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
     // carries: the refusal names the tier and the benefits riding it.
     return bad(res, 403, 'AI Vision is part of the Advanced package — the commercial rungs, with the AI diagnosis, the market intelligence and the priority support (see the ladder)');
   }
-  // THE PRICE OF THE INSIGHT — checked BEFORE the model call so we never do work we
-  // cannot bill for, and so a short farm is told exactly what to do about it.
-  const afford = await visionAffordable(req, res, farm);
-  if (!afford.ok) {
-    return res.status(402).json({
-      ok: false,
-      error: `this insight costs ${zu.VISION_ZU} ZU and the farm holds ${afford.have} — collect today's free ZU, or top up with a pack`,
-      needed: afford.needed, have: afford.have, short: afford.short, suggestedPack: afford.suggestedPack,
-    });
+  // THE PRICE OF THE INSIGHT — RULING 1: the allowance FIRST (a free assessment
+  // needs no balance); beyond it this door's OWN product price applies — the
+  // mid-season insight stays its own product (VISION_ZU), never merged into the
+  // general door's per-use meter. Checked BEFORE the model call so we never do
+  // work we cannot bill for.
+  const al = await visionAllowanceState(farm);
+  if (!farm.isDemo && al.freeLeft <= 0) {
+    const afford = await visionAffordable(req, res, farm, zu.VISION_ZU);
+    if (!afford.ok) return visionPaymentRefused(res, 'stage', afford, al);
   }
   const photo = String(req.body?.photo || '');
   if (!photo.startsWith('data:image/')) return bad(res, 400, 'send a photo of the crop');
@@ -769,9 +841,10 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
     const confidence = ['high', 'medium', 'low'].includes(String(p.confidence)) ? String(p.confidence) : 'medium';
     if (!cropRaw || !Number.isFinite(weeks) || weeks < 0) {
       // The model ANSWERED but told us nothing usable. An answered call is still a
-      // real call we paid for, so it is charged — but no rung is granted for it.
-      const c1 = await chargeVision(req, farm);
-      return ok(res, { proposal: { crop: '', cropKey: '', note, confidence, band: null, weeksFromPlanting: null }, charged: c1.charged, demo: !!c1.demo });
+      // real call we paid for, so it is billed (the allowance or the door's own
+      // price) — but no rung is granted for it.
+      const b1 = await billVisionAnswer(req, farm, 'stage');
+      return ok(res, { proposal: { crop: '', cropKey: '', note, confidence, band: null, weeksFromPlanting: null }, allowed: true, used: b1.used, freeLimit: b1.freeLimit, charged: b1.charged, zuCharged: b1.zuCharged, demo: !!b1.demo });
     }
     // The model's name must land on a species farmline serves — direct key match
     // first, then the label-guesser (corn→maize, maize|mahindi→maize…). No match
@@ -779,8 +852,8 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
     const known = protocols.speciesList().includes(cropRaw) ? cropRaw : schedule.guessSpecies(cropRaw);
     const cropKey = known && protocols.speciesList().includes(known) ? known : '';
     if (!cropKey) {
-      const c2 = await chargeVision(req, farm);
-      return ok(res, { proposal: { crop: cropRaw, cropKey: '', note, confidence, band: null, weeksFromPlanting: Math.max(0, Math.round(weeks)) }, charged: c2.charged, demo: !!c2.demo });
+      const b2 = await billVisionAnswer(req, farm, 'stage');
+      return ok(res, { proposal: { crop: cropRaw, cropKey: '', note, confidence, band: null, weeksFromPlanting: Math.max(0, Math.round(weeks)) }, allowed: true, used: b2.used, freeLimit: b2.freeLimit, charged: b2.charged, zuCharged: b2.zuCharged, demo: !!b2.demo });
     }
     const band = stages.resolveStage(cropKey, Math.round(weeks) * 7);
     // THE MID-SEASON DOOR — THE INSIGHT IS PAID, THE RUNG IS NOT GRANTED.
@@ -799,15 +872,22 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
     // carrot). It failed his own test: it would have opened VERDICT on an AI estimate
     // that he had merely paid for, and a badge bought that way means nothing to a
     // buyer — which is the same lie C6 removed from the trust fields.
-    const charged = await chargeVision(req, farm);
+    // RULING 1 (2026-10-12): the bill is the allowance first (a free assessment
+    // consumes a slot), then THIS door's own product price (VISION_ZU — the
+    // mid-season insight stays its own product).
+    const bill = await billVisionAnswer(req, farm, 'stage');
     return ok(res, {
       proposal: {
         crop: cropRaw, cropKey, note, confidence, band,
         weeksFromPlanting: Math.max(0, Math.round(weeks)),
       },
-      charged: charged.charged,
-      demo: !!charged.demo,
-      balance: charged.balance,
+      allowed: true,
+      used: bill.used,
+      freeLimit: bill.freeLimit,
+      charged: bill.charged,
+      zuCharged: bill.zuCharged,
+      demo: !!bill.demo,
+      balance: bill.balance,
       // Stated to the client so the app can be honest on the spot: this bought an
       // ANSWER, not a rung. The rung still has to be earned from real records.
       bought: 'insight',
@@ -2547,7 +2627,12 @@ api.get('/meta/protocols', (_req, res) => ok(res, {
 }));
 
 api.get('/meta/ladder', (req, res) => {
-  const lang = req.query.lang === 'sw' ? 'sw' : 'en';
+  // THE HATUA LANGUAGE LAW (the founder, 2026-10-12): the ladder speaks the
+  // SELECTED language — the app now carries five, so the route accepts all five
+  // and falls back to en for anything it does not know (landing() falls back
+  // key-by-key for copy not yet authored in that language).
+  const q = String(req.query.lang || '');
+  const lang = ['en', 'sw', 'fr', 'ha', 'am'].includes(q) ? q : 'en';
   return ok(res, {
     foundation: ladder.FOUNDATION.map((r) => ladder.landing(r.id, lang)),
     commercial: ladder.COMMERCIAL.map((r) => ({ ...ladder.landing(r.id, lang), layer: r.layer })),

@@ -300,16 +300,21 @@ function staleness(farm, now = Date.now()) {
 function landing(rungId, lang = 'en') {
   const r = byId(rungId);
   if (!r) return null;
+  // THE HATUA LANGUAGE LAW (the founder, 2026-10-12): the ladder speaks the
+  // SELECTED language, and every read falls back to en when the language has no
+  // authored copy yet (the gets/gives/ai reads already did; name, question and
+  // commitment now do too — a fr/ha/am farmer must never see `undefined`).
+  const L = (o) => (o && (o[lang] || o.en)) || '';
   return {
     rung: r.rung,
-    name: r.name[lang],
-    question: r.question[lang],
+    name: L(r.name),
+    question: L(r.question),
     free: r.free,
     priceKES: r.priceKES,
     priceLabel: r.free ? term('free', lang) : `ZU ${r.priceKES.toLocaleString()}/month`,
     whatYouGet: r.gets[lang] || r.gets.en,
     whatYouGive: r.gives[lang] || r.gives.en,
-    commitment: r.commitment[lang],
+    commitment: L(r.commitment),
     aiLadder: (r.ai && (r.ai[lang] || r.ai.en)) || [],
     requires: r.requires || null,
   };
