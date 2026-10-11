@@ -73,6 +73,34 @@ laws — read them before your first commit.
   demo note retired, the elegant arrival pill, the phone-ask, the About-in-Settings.
 - The founder is on the WEBAPP (not the APK); the update counter law is the deliverer.
 
+## THE ZU SESSION — THE MONEY DOCTRINE CLOSED (2026-10-11; full report in the thread report, the doctrine in `D:\TODOs\farmline-zu-doctrine-20261011.md`)
+
+**The four rulings taken, in order:**
+1. **Farmline never sits between a farmer and a buyer.** Money moves ONE WAY: the farmer pays US, claims it, we confirm. No rail, no provider in the money path.
+2. **ZU ONLY** — "no local currency to Farmline direct, just ZU for paid rungs." Packs exist so the first paid rung is reachable in a SMALL step.
+3. **The daily allowance is ported from Zyppar's `claimTopUp`** — but it ACCUMULATES here, deliberately, because ZU's only job is to open a rung: 8 ZU/day, 12 for a farm logging on 7+ distinct days (VERDICT in ~30 days, or $2.49 today). One per farm per day, locked by a unique index, and claimable even while the collection door is closed — otherwise no farmer has any route to ZU at all.
+4. **The insight is PAID (5 ZU per answered vision call); the rung is NOT granted.** `grantProvisional` is DORMANT and uncalled — the carrot is one line away if the founder ever wants it, and `effectiveRung` already understands it.
+
+**Laws newly in force:**
+- **GATE ON SUCCESS, AND PRICE THE WORK.** The vision charge is checked before the call and taken only after the model ANSWERS; a 502 bills nothing. The demo is never charged.
+- **READINESS MUST BE EARNED, NEVER BOUGHT.** The mid-season estimate's back-calculated records are BORN MARKED (`estimated: true`), and `farmFacts` counts only `estimated: false`. *The setup may be declared; the history must be earned.*
+- **NOTHING IS A STORED OPINION.** `confidence` is DERIVED from real records (21 distinct days → medium, 30 → high). It was read by readiness and written by nobody — which is why the honest path to a paid rung was dead code, and why the shortcut looked like the only way in.
+- **A PAID RUNG IS A PERIOD, RESOLVED ON READ** (`ladder.effectiveRung`): a lapsed period or an expired provisional falls to the free ceiling (2); a 60-day-stale farm PAUSES rather than bills; **the demo is exempt by construction** — money rules must name their exemptions.
+- **THE ACCOUNTING LAW (the CommandCenter class): a missing number is NEVER rendered as 0.** `sources` reports `ok` / `unreachable` / `unreadable`. A zero must mean zero.
+- **ONE KIND PER DOOR:** the shell beacon hard-codes `kind:'shell'`; a caller-supplied kind would let anyone edit the founder's funnel from outside.
+
+**Closed by this session — do not re-open:**
+- **A1, N1, N2**: not fixed — DELETED with the rail. `src/mpesa.js` is gone and the callback routes with it.
+- **`access_log off`**: RETIRED. The last secret-bearing URL (`GET /zu/claims?key=`) is header-only now.
+- **The rung expiry** (recorded, never enforced): closed by `effectiveRung`.
+- **The "illusory" CommandCenter wire**: closed at the source (the diagnosis with its evidence is in the thread report).
+
+**Still on the founder:** `FARMLINE_ZU_COLLECTION` in both `.env` files (the door is shut without it — the money path's last lock) · the deploy · the two nginx diffs (verbatim in the thread report; the CSP line needs a browser test, because the app's inline `style=` attributes make `'unsafe-inline'` load-bearing) · the **`visionTier` decision** (recommendation: grant at registration — the 5 ZU charge is the real gate now, and a tier on top makes the funnel impossible) · a native pass over the new `ha`/`am` money copy.
+
+**Next thread round, in the founder's priority order:** the ladder screen's 402-with-a-pack, then the `payTo` editor + its shop display, then CommandCenter's card display.
+
+**SUPERSEDES the state lines above where they differ:** the money is ZU-only, the virtual/mpesa mode is deleted, and the M-Pesa callback no longer exists.
+
 ## THE UPDATES FREEZE ZONE (2026-10-10, the founder: "it has once again stopped working — time to protect it with caveats")
 - THE PAIR: farmline-app/src/app/core/updates.service.ts + farmline/src/updates.js. THE SHAPE: the verbatim LoopKeeper clone (the founder explicit order), with the SERVED-BUNDLE CLOCK (the server reads /var/www/farmline/build.json — the app and the server deploy independently; the server own counter is NOT the clock).
 - THE LAW: DO NOT TOUCH either file without the founder explicit word. No refactor, no tidy-up, no "improvement", no renaming, no shared-helper extraction. The mechanism was broken and repaired three times; every alteration since has regressed it.
