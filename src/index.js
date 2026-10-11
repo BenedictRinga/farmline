@@ -513,6 +513,17 @@ api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.re
     // other benefits riding it, so even an API-level arrival learns the wall.
     return bad(res, 403, 'AI Vision is part of the Advanced package — the commercial rungs, with the AI diagnosis, the market intelligence and the priority support (see the ladder)');
   }
+  // THE PRICE OF THE INSIGHT — checked BEFORE the model call, so we never do work we
+  // cannot bill for, and a short farm is told exactly what to do about it. (Free-text
+  // door, same price as the photo door: one model call, one value.)
+  const afford = await visionAffordable(req, res, farm);
+  if (!afford.ok) {
+    return res.status(402).json({
+      ok: false,
+      error: `this insight costs ${zu.VISION_ZU} ZU and the farm holds ${afford.have} — collect today's free ZU, or top up with a pack`,
+      needed: afford.needed, have: afford.have, short: afford.short, suggestedPack: afford.suggestedPack,
+    });
+  }
   const b = req.body || {};
   // THE PHOTO FIRST: a body the farmer can fix is judged before the key she
   // cannot — a junk photo gets its 400 even on a not-yet-armed server.
@@ -560,7 +571,17 @@ api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.re
     if (farm.isDemo) { try { await metacounter.bump('vision-demo'); } catch { /* the counter never blocks the answer */ } }
     // B7: the caller's own daily cap counts the same successful answer.
     try { await metacounter.bump(ipKey); } catch { /* never blocks */ }
-    return ok(res, { insight });
+    // THE INSIGHT IS PAID (the founder, 2026-10-11: "I do want it paid for"). Charged
+    // HERE, after the model has answered — a 502 above bills nothing. The free-text
+    // door carries the same price as the photo door: one model call, one value.
+    const charged = await chargeVision(req, farm);
+    return ok(res, {
+      insight,
+      charged: charged.charged,
+      demo: !!charged.demo,
+      balance: charged.balance,
+      bought: 'insight',
+    });
   } catch (e) {
     console.warn('[farmline] vision error:', e.message);
     return bad(res, 502, 'the vision service did not answer — try again');
@@ -599,10 +620,19 @@ async function chargeVision(req, farm) {
 
 /**
  * THE PROVISIONAL RUNG — the second half of the mid-season door.
- * It is a DEMONSTRATION: it lets the farmer feel the paid layer, it is labelled
- * provisional in his own UI and it EXPIRES. It never touches a farm that has already
- * paid, and it never pretends to be earned — the estimate buys a schedule, never
- * history, and `ladder.effectiveRung` reports it as provisional forever.
+ * ███  DORMANT — THIS IS NOT CALLED  ███  (2026-10-11, by the founder's own ruling)
+ *
+ * This was written to grant a 14-day provisional rung at the mid-season door. The
+ * founder then resolved his conflict: "I do want it paid for, but at the same time
+ * not activate a paid rung for which the farmer has not merited by data input, only
+ * payment fact." That sentence retires this function: the mid-season farmer has
+ * PAID, and an AI estimate is not data he entered. Granting VERDICT here would open
+ * a badge on payment fact — the same lie C6 removed from the trust fields.
+ *
+ * It is kept, UNCALLED, as a documented switch in case he ever decides the carrot is
+ * worth it. `ladder.effectiveRung` already understands `rungProvisionalUntil` and
+ * reports it as provisional forever, and the smoke suite proves that behaviour, so
+ * switching it on is a ONE-LINE change. Do not call it without his word.
  */
 async function grantProvisional(farmId) {
   const farm = await Farm.findById(farmId);
@@ -716,13 +746,23 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
       return ok(res, { proposal: { crop: cropRaw, cropKey: '', note, confidence, band: null, weeksFromPlanting: Math.max(0, Math.round(weeks)) }, charged: c2.charged, demo: !!c2.demo });
     }
     const band = stages.resolveStage(cropKey, Math.round(weeks) * 7);
-    // THE MID-SEASON DOOR — BOTH HALVES (the founder's ruling, 2026-10-11).
-    // He pays for the INSIGHT, and the door ALSO opens a PROVISIONAL rung so he can
-    // feel the paid layer. The provisional is labelled in his own UI, expires, and is
-    // never represented to a buyer — and the estimate buys a schedule, never history,
-    // so this cannot smuggle unearned data past readiness.
+    // THE MID-SEASON DOOR — THE INSIGHT IS PAID, THE RUNG IS NOT GRANTED.
+    //
+    // The founder's ruling of 2026-10-11, resolving his own conflict: "I do want it
+    // paid for, but at the same time not activate a paid rung for which the farmer
+    // has not merited by data input, only payment fact."
+    //
+    // So the two are DECOUPLED, and that is the whole resolution:
+    //   · he PAYS for the insight (VISION_ZU) — real value, a real model call, and
+    //     this is revenue that needs no rung to justify it;
+    //   · the rung is NOT touched. Not by the payment, not by the estimate.
+    //
+    // The earlier provisional-rung grant is REMOVED (grantProvisional is now dormant
+    // and uncalled, kept only as a documented switch in case he ever wants the
+    // carrot). It failed his own test: it would have opened VERDICT on an AI estimate
+    // that he had merely paid for, and a badge bought that way means nothing to a
+    // buyer — which is the same lie C6 removed from the trust fields.
     const charged = await chargeVision(req, farm);
-    const provisional = await grantProvisional(req.params.farmId);
     return ok(res, {
       proposal: {
         crop: cropRaw, cropKey, note, confidence, band,
@@ -731,7 +771,9 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
       charged: charged.charged,
       demo: !!charged.demo,
       balance: charged.balance,
-      provisional,
+      // Stated to the client so the app can be honest on the spot: this bought an
+      // ANSWER, not a rung. The rung still has to be earned from real records.
+      bought: 'insight',
     });
   } catch (e) {
     console.warn('[farmline] vision/stage error:', e.message);
