@@ -97,7 +97,7 @@ laws — read them before your first commit.
 
 **Still on the founder:** `FARMLINE_ZU_COLLECTION` in both `.env` files (the door is shut without it — the money path's last lock) · the deploy · the two nginx diffs (verbatim in the thread report; the CSP line needs a browser test, because the app's inline `style=` attributes make `'unsafe-inline'` load-bearing) · the **`visionTier` decision** (recommendation: grant at registration — the 5 ZU charge is the real gate now, and a tier on top makes the funnel impossible) · a native pass over the new `ha`/`am` money copy.
 
-**Next thread round, in the founder's priority order:** the ladder screen's 402-with-a-pack, then the `payTo` editor + its shop display, then CommandCenter's card display.
+**Next thread round, in the founder's priority order:** the ladder screen's 402-with-a-pack, then the `payTo` editor + its shop display, then CommandCenter's card display. **Logged for that round per the oversight lead's verdict:** the claims door still trusts ONE shared admin key (better than a query string, since it now rides a header) — the eventual shape is per-claim audit IDs, so a confirmed claim is attributable to a named operator rather than to whoever holds the key.
 
 **SUPERSEDES the state lines above where they differ:** the money is ZU-only, the virtual/mpesa mode is deleted, and the M-Pesa callback no longer exists.
 
