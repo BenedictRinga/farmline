@@ -349,6 +349,43 @@ function fl_recordVisit(req, kind) {
   } catch { /* never blocks */ }
 }
 
+// ── THE SHELL BEACON — the CommandCenter wire's OTHER half ─────────────────────
+// WHY THIS EXISTS (2026-10-11). The wire reported "shell loads" by reading
+// /var/log/nginx from the ZYPPAR server — a process that is neither www-data nor adm,
+// while nginx writes those logs 0640. readdirSync threw, a bare catch swallowed it,
+// and that half of the panel read a confident ZERO forever. The founder: "the panel
+// and inputs are all illusory, impossibly gathering zero data so far."
+//
+// So the file-permission dependency is REPLACED by a signal the app reports about
+// itself, into the SAME `visits` collection the wire already reads successfully (191
+// rows locally, verified). One row per app boot. No farm document is touched, so the
+// demo's immutability is untouched by construction.
+//
+// It is PUBLIC and unauthenticated on purpose — a visitor's first screen must be able
+// to say "someone arrived" before anyone has a token — so it carries its own valve.
+const shellBeacons = new Map();
+function shellBeaconRateLimit(req, res, next) {
+  const ip = auth.clientIp(req);
+  const now = Date.now();
+  if (shellBeacons.size > 2000) {
+    for (const [k, v] of shellBeacons) if (now - v.ts > 3600_000) shellBeacons.delete(k);
+  }
+  const rec = shellBeacons.get(ip) || { n: 0, ts: now };
+  if (now - rec.ts > 3600_000) { rec.n = 0; rec.ts = now; }
+  rec.n += 1;
+  shellBeacons.set(ip, rec);
+  if (rec.n > 120) return res.status(429).json({ ok: false, error: 'too many beacons from this device' });
+  return next();
+}
+
+api.post('/visit', shellBeaconRateLimit, wrap(async (req, res) => {
+  // ONE KIND, hard-coded on purpose: this door answers one question — did a shell
+  // load? — and a caller-supplied `kind` would let anyone write rows that look like
+  // registers or customer logins in the founder's own analytics.
+  fl_recordVisit(req, 'shell');
+  return ok(res, { noted: true });
+}));
+
 api.post('/auth/demo', auth.mintRateLimit, wrap(async (req, res) => {
   fl_recordVisit(req, 'demo');
   const farm = await Farm.findOne({ isDemo: true });

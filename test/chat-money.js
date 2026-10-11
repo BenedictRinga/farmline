@@ -423,6 +423,38 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       : bad('the provisional path changed the rung unexpectedly');
   }
 
+  // ── 8. THE SHELL BEACON — the CommandCenter wire's other half ────────────────
+  // The wire read "shell loads" from /var/log/nginx, which the zyppar process cannot
+  // read (www-data:adm 0640 beside a bare catch), so that half of the panel showed a
+  // confident ZERO. The app now reports its own boot into the SAME `visits` collection
+  // the wire already reads. This proves the row lands, and that nobody can forge one.
+  {
+    const { conn } = require('../src/models');
+    const visits = conn.db.collection('visits');
+    const shellBefore = await visits.countDocuments({ kind: 'shell' });
+
+    const r = await call('POST', '/visit', { kind: 'shell' });
+    r.status === 200 && r.body?.noted === true
+      ? ok('the shell beacon accepts a boot (200) with NO token — a visitor has none yet')
+      : bad(`the beacon refused a boot: ${r.status} ${JSON.stringify(r.body || {})}`);
+
+    await sleep(300);   // the ledger write is fire-and-forget, by design
+    const shellAfter = await visits.countDocuments({ kind: 'shell' });
+    shellAfter === shellBefore + 1
+      ? ok('the beacon wrote exactly one SHELL row into the ledger the wire reads')
+      : bad(`THE BEACON WROTE ${shellAfter - shellBefore} ROWS (want exactly 1)`);
+
+    // A FORGED KIND MUST NOT LAND: a caller who could write 'register' would be editing
+    // the founder's own funnel numbers from the outside.
+    const regBefore = await visits.countDocuments({ kind: 'register' });
+    await call('POST', '/visit', { kind: 'register' });
+    await sleep(300);
+    const regAfter = await visits.countDocuments({ kind: 'register' });
+    regAfter === regBefore
+      ? ok('a FORGED kind writes no register row — the beacon hard-codes its own kind')
+      : bad('A FORGED KIND WROTE A REGISTER ROW — the funnel can be edited from outside');
+  }
+
   console.log(`\n${fail ? `CHAT+MONEY FAILED — ${fail} problem(s).` : 'CHAT+MONEY PASSED — both doors work, and the rail is honest.'}\n`);
   process.exit(fail ? 1 : 0);
 })();
