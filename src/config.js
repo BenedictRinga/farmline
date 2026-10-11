@@ -74,23 +74,18 @@ const config = {
   // defaults to NODE_ENV so nothing has to be configured for dev to be honest.
   envName: envVar('ENV_NAME', envVar('NODE_ENV', 'development')),
 
-  // ── MONEY (AGENTS.md rule 2) ──────────────────────────────────────────────
-  // 'virtual' = ZU (Zyppar Units, 1 ZU ≈ $0.01)   'mpesa' = real money
-  // Per-farm override lives on the Farm document; this is only the default.
-  moneyMode: envVar('MONEY_MODE', 'virtual') === 'mpesa' ? 'mpesa' : 'virtual',
-  zuPerKes: Number(envVar('ZU_PER_KES', '0.13')),   // ~1 USD = 130 KES; 1 ZU ≈ $0.01 ⇒ 1 KES ≈ 0.13 ZU
-  mpesa: {
-    consumerKey: envVar('MPESA_CONSUMER_KEY'),
-    consumerSecret: envVar('MPESA_CONSUMER_SECRET'),
-    shortcode: envVar('MPESA_SHORTCODE'),
-    passkey: envVar('MPESA_PASSKEY'),
-    env: envVar('MPESA_ENV', 'sandbox'),
-  },
+  // ── MONEY (rewritten 2026-10-11 — the ZU-only doctrine) ─────────────────────
+  // REMOVED: `moneyMode` (the virtual/mpesa rail toggle), `zuPerKes` (a KES peg
+  // on ZU) and the whole `mpesa` credential block. All three existed to run a
+  // rail that moved money BETWEEN a buyer and a farmer — the one thing the
+  // founder ruled out on jurisdictional and reputational grounds.
+  //
+  // Farmline sells ONE thing — ZU — and ZU unlocks the paid rungs. There is no
+  // mode to configure, no peg to maintain, and no outbound credentials to hold.
+  // See src/zu.js (the unit and the prices), src/money.js (the ledger), and
+  // D:\TODOs\farmline-zu-doctrine-20261011.md (the authority).
 
-  // WHERE THE PUBLIC WORLD CAN REACH US. Daraja needs an https URL to POST the
-  // payment result to, so this must be the real host, not localhost — a callback
-  // pointed at localhost silently never arrives and the order stays pending
-  // forever with the buyer's money already gone.
+  // WHERE THE PUBLIC WORLD CAN REACH US.
   publicUrl: envVar('FARMLINE_PUBLIC_URL', 'https://zyppar.com'),
 
   // ── THE DEMO VISION SPEND (Task 3, 2026-10-10) — the daily threshold at which

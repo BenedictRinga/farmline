@@ -39,7 +39,7 @@ const auth = require('./auth');
 const vocab = require('./vocab');
 const ladder = require('./ladder');
 const money = require('./money');
-const mpesa = require('./mpesa');
+const zu = require('./zu');
 const chat = require('./chat');
 const updates = require('./updates');
 const schedule = require('./schedule');
@@ -51,7 +51,7 @@ const feedback = require('./feedback');
 const metacounter = require('./metacounter');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
-  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating,
+  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating, ZuClaim,
 } = require('./models');
 
 const app = express();
@@ -258,9 +258,14 @@ const healthPayload = () => ({
   dbName: config.dbName,
   // A4: authArmed is NO LONGER published here — /health is public, and a server
   // with no secret must not advertise its own disarmament to the internet. The
-  // armed state lives in the boot log (line ~1986) and in /admin/farms (gated).
-  moneyMode: config.moneyMode,
-  mpesaConfigured: money.mpesaConfigured(),
+  // armed state lives in the boot log and in /admin/farms (gated).
+  //
+  // THE MONEY FIELDS ARE GONE WITH THE RAIL (2026-10-11): `moneyMode` and
+  // `mpesaConfigured` described a rail between a buyer and a farmer. There is no
+  // such rail. What is left that a monitor actually wants is whether the ZU door
+  // is OPEN — i.e. whether the operator has published collection details, since
+  // without them nobody can credit an account.
+  zuOpen: zu.collectionOpen(),
   basePath: config.basePath,
   build: Number(require('../package.json').build) || 0,
   at: new Date().toISOString(),
@@ -291,7 +296,10 @@ api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
   const farm = await Farm.create({
     name: farmName || `${name || 'My'} Farm`,
     slug: slugify(farmName || name || 'farm') + '-' + Math.random().toString(36).slice(2, 6),
-    area, moneyMode: config.moneyMode,
+    area,
+    // No money-mode is set at birth any more (2026-10-11): the virtual/mpesa
+    // toggle belonged to the deleted rail. A new farm starts on the free rungs
+    // with a zero ZU balance, which is the honest starting state.
   });
   const { salt, hash } = auth.hashPin(pin);
   const member = await Member.create({ farmId: farm._id, phone: String(phone), name, role: 'owner', pinSalt: salt, pinHash: hash });
@@ -363,23 +371,18 @@ api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
   let granted = 0;
   if (!customer) {
     customer = await Customer.create({ phone: String(phone), name });
-    // Virtual mode is only usable if a new buyer has something to spend, so the
-    // first visit grants a starting credit. Real mode needs none of this.
-    // THE AUDIT'S 500 CLOSED (2026-10-08): the grant rides the LEDGER, whose
-    // farmId is required — a caller with no slug (farm: null) used to throw a
-    // raw ValidationError and answer 500. Without a farm context the honest
-    // answer is the token with granted: 0 — the credit arrives when they reach
-    // a farm through its link, which is the only way the app calls this.
-    if (config.moneyMode === 'virtual') {
-      const farm = slug ? await Farm.findOne({ slug }).select('_id').lean() : null;
-      if (farm) granted = await money.grantStartingZU({ farm, customer, zu: 500 });
-    }
+    // NO STARTING ZU IS MINTED ANY MORE (the doctrine, 2026-10-11). The old grant
+    // handed 500 ZU to every new buyer so a demo could be walked — Farmline
+    // issuing credit into a rail that carried money between a buyer and a farmer.
+    // ZU is now Farmline's own unit, bought by the FARMER to open his paid rungs,
+    // and the storefront is not a paying surface at all: this endpoint's job is a
+    // customer token and nothing else. `zu` remains in the answer so the app's
+    // existing shape does not break, and it is honestly zero.
   }
-  const bal = await money.balance({ ownerType: 'customer', ownerId: customer._id, mode: 'virtual' });
   return ok(res, {
     token: auth.mintCustomerToken(customer._id),
     customer: { id: customer._id, name: customer.name },
-    zu: { balance: bal, granted },
+    zu: { balance: 0, granted: 0 },
   });
 }));
 
@@ -403,9 +406,28 @@ api.get('/me', auth.requireAuth('farmer'), wrap(async (req, res) => {
   }
   const farm = await Farm.findById(req.auth.sub).lean();
   if (!farm) return bad(res, 404, 'farm not found');
+  // THE RUNG THE APP RENDERS IS THE EFFECTIVE ONE, resolved at read time. A lapsed
+  // paid period or an expired provisional rung must not keep showing as held — that
+  // is what makes "farmline decides readiness" true at the surface as well as in the
+  // database. The stored value rides along as `storedRung` so nothing is lost, and
+  // `rungProvisional` is what lets the farmer's own UI label a demonstration honestly.
+  const eff = ladder.effectiveRung(await farmWithActivity(farm));
   // The contract is explicit even for farms minted before a field existed
   // (mongo does not backfill): the vision tier is 'none' unless set.
-  return ok(res, { farm: { ...farm, visionTier: farm.visionTier || 'none' }, member, authArmed: auth.authArmed });
+  return ok(res, {
+    farm: {
+      ...farm,
+      rung: eff.rung,
+      storedRung: eff.stored,
+      rungPaid: eff.paid,
+      rungProvisional: eff.provisional,
+      rungExpired: eff.expired,
+      rungPaused: eff.paused,
+      visionTier: farm.visionTier || 'none',
+    },
+    member,
+    authArmed: auth.authArmed,
+  });
 }));
 
 // ── THE FARM'S PROFILE (the founder, 2026-10-07: "we have no editing of farm
@@ -441,6 +463,16 @@ api.patch('/farm/:farmId/profile', auth.requireAuth('farmer'), auth.requireFarmS
       return bad(res, 400, 'the photo is too large — pick a smaller one');
     }
     set.photo = photo;
+  }
+  if (b.payTo !== undefined) {
+    // THE FARMER'S OWN PAYMENT WORDS (the ZU doctrine, 2026-10-11): how HIS buyers
+    // should pay HIM — paybill/till/bank/Airtel/"cash at pickup". Free text, and
+    // deliberately so: Farmline shows it and never parses it. There is no rail
+    // here and no validation of account numbers, because we are not a party to
+    // the payment and must never look like one.
+    const payTo = String(b.payTo || '').trim();
+    if (payTo.length > 600) return bad(res, 400, 'that is too long — keep it to the lines a buyer needs');
+    set.payTo = payTo;
   }
   if (!Object.keys(set).length) return bad(res, 400, 'nothing to update');
   const farm = await Farm.findByIdAndUpdate(req.auth.sub, { $set: set }, { new: true }).lean();
@@ -536,6 +568,53 @@ api.post('/farm/:farmId/vision', visionBody, auth.requireAuth('farmer'), auth.re
 }));
 
 // ── THE VISION STAGE PROPOSAL (Door 2 of the mid-season door, 2026-10-09) ─────
+/**
+ * THE VISION CHARGE — the mid-season door, the founder's ruling: "both".
+ * He pays for the INSIGHT (a real model call, real value) and he gets a PROVISIONAL
+ * rung to feel the paid layer. Two rules it must obey:
+ *   · the DEMO is NEVER charged — a visitor's walk has no balance and never should;
+ *   · refusal happens BEFORE the model call, and the charge lands only when the model
+ *     has actually ANSWERED. A 502 bills nothing (the standing rule: gate on success).
+ */
+async function visionAffordable(req, res, farm) {
+  if (farm?.isDemo) return { ok: true, demo: true, have: 0 };
+  const have = await money.balance({ farmId: req.params.farmId });
+  if (have < zu.VISION_ZU) {
+    const short = zu.VISION_ZU - have;
+    return { ok: false, have, needed: zu.VISION_ZU, short, suggestedPack: zu.packFor(short) };
+  }
+  return { ok: true, have };
+}
+
+/** Charge AFTER the model answered. Idempotent within one request — never twice. */
+async function chargeVision(req, farm) {
+  if (req._zuVision) return req._zuVision;
+  if (farm?.isDemo) { req._zuVision = { charged: 0, demo: true }; return req._zuVision; }
+  const r = await money.spend({
+    farmId: req.params.farmId, amountZU: zu.VISION_ZU, ref: 'vision', note: 'AI vision call',
+  });
+  req._zuVision = r.ok ? { charged: zu.VISION_ZU, balance: r.balance } : { charged: 0, uncharged: true };
+  return req._zuVision;
+}
+
+/**
+ * THE PROVISIONAL RUNG — the second half of the mid-season door.
+ * It is a DEMONSTRATION: it lets the farmer feel the paid layer, it is labelled
+ * provisional in his own UI and it EXPIRES. It never touches a farm that has already
+ * paid, and it never pretends to be earned — the estimate buys a schedule, never
+ * history, and `ladder.effectiveRung` reports it as provisional forever.
+ */
+async function grantProvisional(farmId) {
+  const farm = await Farm.findById(farmId);
+  if (!farm) return null;
+  const paidLive = farm.rungPaidUntil && new Date(farm.rungPaidUntil).getTime() > Date.now();
+  if (paidLive) return null;                       // never demote or duplicate a paid farm
+  farm.rung = Math.max(Number(farm.rung) || 0, ladder.FREE_CEILING + 1);
+  farm.rungProvisionalUntil = new Date(Date.now() + zu.PROVISIONAL_DAYS * 86400000);
+  await farm.save();
+  return { rung: farm.rung, until: farm.rungProvisionalUntil, days: zu.PROVISIONAL_DAYS };
+}
+
 // The farmer photographs the crop; the model proposes crop + growth stage; ONE
 // confirm tap in the app turns that into Door 1's back-calculation. The AI
 // proposes; the farmer confirms; nothing writes without the tap (the
@@ -554,6 +633,16 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
     // THE PAID-TIER TRUTH (Task 2) — the same sentence the free-text vision route
     // carries: the refusal names the tier and the benefits riding it.
     return bad(res, 403, 'AI Vision is part of the Advanced package — the commercial rungs, with the AI diagnosis, the market intelligence and the priority support (see the ladder)');
+  }
+  // THE PRICE OF THE INSIGHT — checked BEFORE the model call so we never do work we
+  // cannot bill for, and so a short farm is told exactly what to do about it.
+  const afford = await visionAffordable(req, res, farm);
+  if (!afford.ok) {
+    return res.status(402).json({
+      ok: false,
+      error: `this insight costs ${zu.VISION_ZU} ZU and the farm holds ${afford.have} — collect today's free ZU, or top up with a pack`,
+      needed: afford.needed, have: afford.have, short: afford.short, suggestedPack: afford.suggestedPack,
+    });
   }
   const photo = String(req.body?.photo || '');
   if (!photo.startsWith('data:image/')) return bad(res, 400, 'send a photo of the crop');
@@ -612,7 +701,10 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
     const note = String(p.note || '').trim().slice(0, 120);
     const confidence = ['high', 'medium', 'low'].includes(String(p.confidence)) ? String(p.confidence) : 'medium';
     if (!cropRaw || !Number.isFinite(weeks) || weeks < 0) {
-      return ok(res, { proposal: { crop: '', cropKey: '', note, confidence, band: null, weeksFromPlanting: null } });
+      // The model ANSWERED but told us nothing usable. An answered call is still a
+      // real call we paid for, so it is charged — but no rung is granted for it.
+      const c1 = await chargeVision(req, farm);
+      return ok(res, { proposal: { crop: '', cropKey: '', note, confidence, band: null, weeksFromPlanting: null }, charged: c1.charged, demo: !!c1.demo });
     }
     // The model's name must land on a species farmline serves — direct key match
     // first, then the label-guesser (corn→maize, maize|mahindi→maize…). No match
@@ -620,14 +712,26 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
     const known = protocols.speciesList().includes(cropRaw) ? cropRaw : schedule.guessSpecies(cropRaw);
     const cropKey = known && protocols.speciesList().includes(known) ? known : '';
     if (!cropKey) {
-      return ok(res, { proposal: { crop: cropRaw, cropKey: '', note, confidence, band: null, weeksFromPlanting: Math.max(0, Math.round(weeks)) } });
+      const c2 = await chargeVision(req, farm);
+      return ok(res, { proposal: { crop: cropRaw, cropKey: '', note, confidence, band: null, weeksFromPlanting: Math.max(0, Math.round(weeks)) }, charged: c2.charged, demo: !!c2.demo });
     }
     const band = stages.resolveStage(cropKey, Math.round(weeks) * 7);
+    // THE MID-SEASON DOOR — BOTH HALVES (the founder's ruling, 2026-10-11).
+    // He pays for the INSIGHT, and the door ALSO opens a PROVISIONAL rung so he can
+    // feel the paid layer. The provisional is labelled in his own UI, expires, and is
+    // never represented to a buyer — and the estimate buys a schedule, never history,
+    // so this cannot smuggle unearned data past readiness.
+    const charged = await chargeVision(req, farm);
+    const provisional = await grantProvisional(req.params.farmId);
     return ok(res, {
       proposal: {
         crop: cropRaw, cropKey, note, confidence, band,
         weeksFromPlanting: Math.max(0, Math.round(weeks)),
       },
+      charged: charged.charged,
+      demo: !!charged.demo,
+      balance: charged.balance,
+      provisional,
     });
   } catch (e) {
     console.warn('[farmline] vision/stage error:', e.message);
@@ -1439,6 +1543,11 @@ api.post('/farm/:farmId/events/:eventId/confirm-estimated', auth.requireAuth('fa
     farm, eventId: req.params.eventId, byMemberId: req.auth.mid || null,
     productUsed: req.body?.productUsed || '', speciesHint: req.body?.species || '',
     noteExtra: 'confirmed from the mid-season estimate (planting date estimated)',
+    // THE HONESTY FLAG (the founder's ruling, 2026-10-11): this record was
+    // BACK-CALCULATED by the mid-season estimate, not witnessed by the farmer. It
+    // travels as `estimated: true` so readiness can never count it as history — the
+    // estimate buys a SCHEDULE, never HISTORY. See farmFacts().
+    estimated: true,
   });
   if (!result.ok) return bad(res, 404, result.error || 'event not found');
   const holds = await projection.activeHolds(req.params.farmId);
@@ -1776,83 +1885,133 @@ api.post('/conversations/:id/read', auth.requireAuth('farmer', 'customer'), wrap
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
-// M-PESA CALLBACK — Safaricom posts here. NOT under /api/farmline auth: Daraja has
-// no bearer token.
-// A1 (2026-10-10, the founder's ruling): the door now authenticates by SECRET IN
-// THE URL — the segment Daraja registered (money.js builds it from
-// MPESA_CALLBACK_SECRET || AUTH_SECRET). The LEGACY path is kept as a loud 403 so
-// a stale Daraja registration fails CLOSED, never open — the deploy step is to
-// re-register the callback URL with the secret segment.
+// THE M-PESA CALLBACK IS DELETED — READ THIS BEFORE PUTTING ANYTHING BACK
 // ══════════════════════════════════════════════════════════════════════════════
-api.post('/mpesa/callback', wrap(async (req, res) => {
-  console.warn('[farmline] mpesa callback on the LEGACY path REFUSED — re-register the Daraja callback URL with the secret segment (A1)');
-  return res.status(403).json({ ok: false, error: 'unauthorised callback path' });
-}));
-
-api.post('/mpesa/callback/:seg', wrap(async (req, res) => {
-  const expected = config.envVar('MPESA_CALLBACK_SECRET') || config.envVar('AUTH_SECRET') || '';
-  if (!expected) {
-    // DEV GRACE ONLY: no secret configured anywhere (a keyless local machine).
-    // Production always carries AUTH_SECRET (A4's boot check says so loudly).
-    console.warn('[farmline] mpesa callback accepted WITHOUT a secret — no MPESA_CALLBACK_SECRET/AUTH_SECRET set (dev grace)');
-  } else if (String(req.params.seg) !== expected) {
-    console.warn('[farmline] mpesa callback: BAD secret segment — refused');
-    return res.status(403).json({ ok: false, error: 'unauthorised callback' });
-  }
-
-  const parsed = mpesa.parseCallback(req.body);
-  if (!parsed.checkoutRequestId) return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
-
-  const out = await money.settleByCheckout(parsed.checkoutRequestId, parsed);
-  console.log(`[farmline] mpesa callback ${parsed.checkoutRequestId}: ${parsed.status}`
-    + `${parsed.receipt ? ' ' + parsed.receipt : ''}${out.matched ? '' : ' (no matching ledger entry)'}`
-    + `${out.mismatch ? ' AMOUNT MISMATCH — refused' : ''}${out.already ? ' (already settled)' : ''}`);
-
-  // Daraja only needs a 200 with this envelope; it retries on anything else.
-  // `matched`/`already` ride beside it for the tests and the trail — harmless to
-  // Daraja, and the trail proves the idempotence (A1).
-  return res.json({ ResultCode: 0, ResultDesc: 'Accepted', matched: out.matched, already: !!out.already });
-}));
+// What stood here: `POST /mpesa/callback[/:seg]`, which settled a buyer's payment
+// to a FARMER against a public endpoint, plus the amount-mismatch logic and the
+// idempotence trail behind it. It was hardened once (secret in the URL, A1),
+// which then leaked that secret into the nginx access log (N1) and needed a
+// constant-time compare (N2).
+//
+// The founder's ruling of 2026-10-11 removed the need for any of it: Farmline is
+// not between a farmer and a buyer, so Farmline has no settlement to be told
+// about. The rail — and this callback with it — is deleted, not disabled. A1, N1
+// and N2 are not fixed here; they are UNREACHABLE, because the code that carried
+// them no longer exists. That is the point, and it is worth more than a hardened
+// callback would have been.
+//
+// DO NOT REINTRODUCE a money callback. If a provider is ever added (Paystack,
+// Flutterwave, M-Pesa), it may automate the CONFIRMATION of a ZU claim —
+// /zu/claims/:id/confirm — and nothing else. Money still moves one way: the payer
+// → US, into our own account, for our own service. See
+// D:\TODOs\farmline-zu-doctrine-20261011.md, and src/money.js for the why.
 
 // ══════════════════════════════════════════════════════════════════════════════
 // FARMER — the ladder (the self-deciding engine)
 // ─═════════════════════════════════════════════════════════════════════════════
+/**
+ * FARM FACTS — the numbers readiness decides on.
+ *
+ * THE HONESTY RULE (the founder's ruling, 2026-10-11: "readiness must exclude
+ * estimated artifacts or we allow a monster"). The mid-season door writes
+ * BACK-CALCULATED logs (`estimated: true`) so a farmer gets a schedule to work to.
+ * Those are real value, and they must NEVER count as history — otherwise a farmer
+ * could manufacture three weeks of records in one afternoon and buy the VERDICT
+ * badge on fiction.
+ *
+ * So the line is: the SETUP may be declared (a crop he started is a crop he
+ * started), but the HISTORY must be earned. Every count below is `estimated: false`.
+ *
+ * `confidence` is DERIVED here, on read. Nothing persisted it before — the field
+ * existed, was read by readiness, and was written by nobody, which is why the
+ * ladder could never recommend past rung 2 and the only visible way into a paid
+ * rung was the shortcut. It is derived for the same reason the ZU balance is: a
+ * stored grade drifts away from the records it claims to summarise, and the ladder
+ * would then be deciding on a stale opinion.
+ */
 async function farmFacts(farmId) {
   const since = new Date(Date.now() - 30 * 86400000);
-  const [logs30d, daysAgg, sellables, plots, groups, cycles, treatments, orders, completed] = await Promise.all([
-    Log.countDocuments({ farmId, at: { $gte: since } }),
-    Log.aggregate([{ $match: { farmId } }, { $group: { _id: null, oldest: { $min: '$at' } } }]),
+  const real = { farmId, estimated: { $ne: true } };
+  const [logs30d, oldestAgg, dayAgg, sellables, plots, groups, cycles, treatments, orders, completed, newestAgg] = await Promise.all([
+    Log.countDocuments({ ...real, at: { $gte: since } }),
+    Log.aggregate([{ $match: real }, { $group: { _id: null, oldest: { $min: '$at' } } }]),
+    Log.aggregate([
+      { $match: { ...real, at: { $gte: since } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$at' } } } },
+      { $count: 'days' },
+    ]),
     Sellable.countDocuments({ farmId }),
     Plot.countDocuments({ farmId }),
     AnimalGroup.countDocuments({ farmId, active: true }),
     CropCycle.countDocuments({ farmId }),
-    Log.countDocuments({ farmId, kind: { $in: ['treatment', 'spray'] } }),
+    Log.countDocuments({ ...real, kind: { $in: ['treatment', 'spray'] } }),
     Order.countDocuments({ farmId }),
     Order.countDocuments({ farmId, stage: 5 }),
+    Log.aggregate([{ $match: real }, { $group: { _id: null, newest: { $max: '$at' } } }]),
   ]);
-  const oldest = daysAgg[0]?.oldest ? new Date(daysAgg[0].oldest) : null;
+  const oldest = oldestAgg[0]?.oldest ? new Date(oldestAgg[0].oldest) : null;
+  const newest = newestAgg[0]?.newest ? new Date(newestAgg[0].newest) : null;
   const daysOfHistory = oldest ? Math.floor((Date.now() - oldest.getTime()) / 86400000) : 0;
+  const distinctDays = dayAgg[0]?.days || 0;
   const farm = await Farm.findById(farmId).lean();
+
+  // The grade, from REAL records. The thresholds match the product's own copy:
+  // 21 days is where the comparisons unlock, "about 30 days" is where the verdict
+  // becomes trustworthy. 30 distinct days ≈ a month of actually showing up.
+  const derived = (distinctDays >= 30 && logs30d >= 45) ? 'high'
+    : (distinctDays >= 21 && logs30d >= 25) ? 'medium'
+      : 'low';
+  // A stored grade is honoured ONLY when the records support it — never above them.
+  const rank = { low: 0, medium: 1, high: 2 };
+  const stored = farm?.confidence?.grade;
+  const confidence = (stored && rank[stored] !== undefined && rank[stored] <= rank[derived]) ? stored : derived;
+
   return {
-    logs30d, daysOfHistory, sellables, plots, animalGroups: groups, cropCycles: cycles,
+    logs30d, daysOfHistory, distinctDays, sellables, plots, animalGroups: groups, cropCycles: cycles,
     treatmentsLogged: treatments, orderCount: orders, completedOrders: completed,
     hasRequiredIncome: !!(farm?.requiredIncome?.offFarmMonthly || farm?.requiredIncome?.householdMonthly),
-    confidence: farm?.confidence?.grade || 'low',
+    confidence, confidenceDerived: derived,
+    lastLoggedAt: newest,   // REAL activity only — what the staleness/pause rule must read
   };
 }
 
+/**
+ * THE FARM AS THE LADDER SHOULD SEE IT. `ladder.staleness()` reads
+ * `confidence.lastLoggedAt`, which nothing stores — so the pause rule could never
+ * fire. This attaches the newest REAL log before the ladder is asked anything, so
+ * "has this farm stopped working?" is answered from records, not from a field that
+ * is always empty.
+ */
+async function farmWithActivity(farm) {
+  if (!farm) return farm;
+  const last = await Log.findOne({ farmId: farm._id, estimated: { $ne: true } })
+    .sort({ at: -1 }).select('at').lean();
+  return { ...farm, confidence: { ...(farm.confidence || {}), lastLoggedAt: last?.at || null } };
+}
+
 api.get('/farm/:farmId/ladder', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
-  const farm = await Farm.findById(req.params.farmId).lean();
+  const raw = await Farm.findById(req.params.farmId).lean();
+  const farm = await farmWithActivity(raw);
   const facts = await farmFacts(req.params.farmId);
   const read = ladder.readiness(facts);
   const stale = ladder.staleness(farm);
+  const eff = ladder.effectiveRung(farm);
+  const lang = req.query.lang === 'sw' ? 'sw' : 'en';
   return ok(res, {
-    currentRung: farm.rung,
+    // THE RUNG HE ACTUALLY STANDS ON, resolved at read time — never the raw stored
+    // number, which would keep claiming a rung that nothing is paying for. A lapsed
+    // paid period, an expired provisional rung and a paused farm all show up here.
+    currentRung: eff.rung,
+    storedRung: eff.stored,
+    rungPaid: eff.paid,
+    rungProvisional: eff.provisional,
+    rungExpired: eff.expired,
+    rungPaused: eff.paused,
     // The whole ladder, so the first farmer can SEE the start AND the upside.
-    foundation: ladder.FOUNDATION.map((r) => ladder.landing(r.id, req.query.lang === 'sw' ? 'sw' : 'en')),
-    commercial: ladder.COMMERCIAL.map((r) => ({ ...ladder.landing(r.id, req.query.lang === 'sw' ? 'sw' : 'en'), layer: r.layer })),
+    foundation: ladder.FOUNDATION.map((r) => ladder.landing(r.id, lang)),
+    commercial: ladder.COMMERCIAL.map((r) => ({ ...ladder.landing(r.id, lang), layer: r.layer })),
     recommended: read.recommended,
-    recommendation: ladder.landing(ladder.RUNGS[read.recommended]?.id, req.query.lang === 'sw' ? 'sw' : 'en'),
+    recommendation: ladder.landing(ladder.RUNGS[read.recommended]?.id, lang),
     gaps: read.gaps,
     reason: read.reason,
     staleness: stale,
@@ -1861,22 +2020,25 @@ api.get('/farm/:farmId/ladder', auth.requireAuth('farmer'), auth.requireFarmScop
 }));
 
 /** Accepting a rung is an explicit act. Nothing is ever charged silently.
- *  THE PAID WALL HOLDS (the founder's audit ruling, 2026-10-08: "v-A"): until
- *  the payment rounds build activation, a PAID rung is refused — whatever the
- *  readiness says, and no force bypasses it. A farm that could "accept" a
- *  subscription nothing was bought for would carry a phantom badge and a mess
- *  for the day real payments arrive. The free rungs keep the data gates. */
+ *
+ *  FREE RUNGS (0-2) open on readiness alone — that is the distribution model.
+ *
+ *  PAID RUNGS (3-6) are bought with ZU (the doctrine, 2026-10-11: "no local
+ *  currency to Farmline direct — just ZU for paid rungs"). The farmer's tap is
+ *  the purchase; ZU is deducted for a 30-day period and the rung opens. When the
+ *  period lapses the rung PAUSES — it never auto-bills, because the standing law
+ *  is "nothing is ever charged silently", and because a farm that stops providing
+ *  data should be downgraded rather than billed (ladder.staleness, already built).
+ *
+ *  ATOMICITY (the A5 lesson): the farm row is CLAIMED first with one
+ *  findOneAndUpdate on the not-yet-paid state, the ZU is spent second, and the
+ *  claim is rolled back if the balance will not cover it. A double-tap therefore
+ *  cannot buy two periods, and a short balance cannot leave a phantom badge. */
 api.post('/farm/:farmId/ladder/accept', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const id = String(req.body?.rung || '');
   const r = ladder.byId(id);
   if (!r) return bad(res, 400, 'unknown rung');
-  if (!r.free) {
-    return res.status(403).json({
-      ok: false,
-      error: 'the paid rungs arrive with the paid rounds — nothing to activate yet',
-    });
-  }
-  const farm = await Farm.findById(req.params.farmId).lean();
+
   const facts = await farmFacts(req.params.farmId);
   const read = ladder.readiness(facts);
   if (r.rung > read.recommended && !req.body?.force) {
@@ -1886,37 +2048,280 @@ api.post('/farm/:farmId/ladder/accept', auth.requireAuth('farmer'), auth.require
       gaps: read.gaps.filter((g) => g.for === id),
     });
   }
-  await Farm.updateOne({ _id: req.params.farmId }, { $set: { rung: r.rung, rungAcceptedAt: new Date() } });
-  return ok(res, { rung: r.rung, name: r.name, free: r.free, priceKES: r.priceKES });
-}));
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MONEY — the two-mode toggle (AGENTS.md rule 2)
-// ══════════════════════════════════════════════════════════════════════════════
-api.get('/farm/:farmId/money', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
-  const farm = await Farm.findById(req.params.farmId).lean();
-  const [zu, kes] = await Promise.all([
-    money.balance({ ownerType: 'farm', ownerId: farm._id, mode: 'virtual' }),
-    money.balance({ ownerType: 'farm', ownerId: farm._id, mode: 'mpesa' }),
-  ]);
+  // ── THE FREE RUNGS ──────────────────────────────────────────────────────────
+  if (r.free) {
+    await Farm.updateOne({ _id: req.params.farmId }, { $set: { rung: r.rung, rungAcceptedAt: new Date() } });
+    return ok(res, { rung: r.rung, name: r.name, free: true, zu: 0, paidUntil: null });
+  }
+
+  // ── THE PAID RUNGS — ZU buys the period ─────────────────────────────────────
+  const priceZU = zu.priceForRung(id);
+  if (!priceZU) return bad(res, 400, 'that rung has no ZU price yet');
+
+  const until = new Date(Date.now() + zu.PERIOD_DAYS * 86400000);
+  const alreadyPaid = await Farm.findOne({
+    _id: req.params.farmId,
+    rungPaidUntil: { $gt: new Date() },
+  }).select('_id rungPaidUntil').lean();
+  if (alreadyPaid) {
+    return bad(res, 409, 'this rung is already open — it runs until your paid period ends');
+  }
+
+  // THE CLAIM: one atomic transition from "not paid" to "paid". Two taps race
+  // here and only one wins.
+  const claimed = await Farm.findOneAndUpdate(
+    {
+      _id: req.params.farmId,
+      $or: [{ rungPaidUntil: null }, { rungPaidUntil: { $lte: new Date() } }],
+    },
+    { $set: { rung: r.rung, rungAcceptedAt: new Date(), rungPaidUntil: until } },
+    { new: true },
+  );
+  if (!claimed) return bad(res, 409, 'this rung is already open — it runs until your paid period ends');
+
+  const spent = await money.spend({
+    farmId: req.params.farmId,
+    amountZU: priceZU,
+    ref: `rung-${id}`,
+    note: `${r.name?.en || id} opened for ${zu.PERIOD_DAYS} days`,
+  });
+  if (!spent.ok) {
+    // ROLL BACK the claim — an unaffordable tap must leave no trace at all.
+    await Farm.updateOne(
+      { _id: req.params.farmId },
+      { $set: { rung: 0, rungPaidUntil: null } },
+    );
+    const pack = zu.packFor(spent.short || priceZU);
+    return res.status(402).json({
+      ok: false,
+      error: `You need ${priceZU} ZU for this rung and have ${spent.have}. ${spent.short} ZU short.`,
+      needed: priceZU,
+      have: spent.have,
+      short: spent.short,
+      suggestedPack: { id: pack.id, name: pack.name, zu: pack.zu, usd: pack.usd },
+    });
+  }
+
   return ok(res, {
-    mode: money.modeFor(farm),
-    modes: money.MODES,
-    balances: { zu, kes },
-    quote: money.quote(1000),
-    mpesaConfigured: money.mpesaConfigured(),
-    mpesaSet: !!(farm?.mpesa?.paybill || farm?.mpesa?.till),
+    rung: r.rung,
+    name: r.name,
+    free: false,
+    zu: priceZU,
+    balance: spent.balance,
+    paidUntil: until,
   });
 }));
 
-api.post('/farm/:farmId/money/mode', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
-  const mode = String(req.body?.mode || '');
-  if (!money.MODES.includes(mode)) return bad(res, 400, 'mode must be virtual or mpesa');
-  if (mode === 'mpesa' && !money.mpesaConfigured()) {
-    return bad(res, 501, 'M-Pesa is not armed on this server yet — stay on ZU (virtual) for now');
+// ══════════════════════════════════════════════════════════════════════════════
+// ZU — FARMLINE'S OWN UNIT (the money doctrine, 2026-10-11)
+// ══════════════════════════════════════════════════════════════════════════════
+// Farmline sells ONE thing — ZU — and ZU unlocks the paid rungs. Money moves ONE
+// WAY: the farmer pays US, claims it, and the operator confirms. There is no
+// payment provider in the path, and no endpoint in this file touches anybody
+// else's money. The authority is D:\TODOs\farmline-zu-doctrine-20261011.md.
+//
+// This block REPLACES the old two-mode money toggle (`/money` + `/money/mode`),
+// which existed to switch a farm between a ZU ledger and an M-Pesa rail that
+// asked a BUYER's phone to pay a FARMER. That rail is deleted — not disabled.
+
+const shapeClaim = (c) => ({
+  id: String(c._id),
+  packId: c.packId || '',
+  zu: c.zu,
+  usd: c.usd,
+  method: c.method || '',
+  reference: c.reference || '',
+  note: c.note || '',
+  status: c.status,
+  reason: c.reason || '',
+  at: c.createdAt,
+  decidedAt: c.decidedAt || null,
+});
+
+// THE FARMER'S ZU VIEW: balance, packs, rung prices, our collection details, and
+// his own claims. This is the whole commercial surface of the product.
+/**
+ * THE DAY KEY for the allowance. It is a CALENDAR boundary in the founder's own
+ * day (Africa/Nairobi), never a rolling 24 hours — a rolling window would let a
+ * farmer collect twice within minutes by waiting for the clock to tick over.
+ */
+function zuDayKey(now = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now);
+  } catch {
+    return now.toISOString().slice(0, 10);
   }
-  await Farm.updateOne({ _id: req.params.farmId }, { $set: { moneyMode: mode } });
-  return ok(res, { mode });
+}
+
+/**
+ * IS THIS FARM ACTUALLY WORKING? Distinct days with a REAL log in the last 30 —
+ * the Farmline analogue of Zyppar's "creator" tier (3+ posts a month). Estimated
+ * artifacts do not count here either: the allowance is a reward for showing up.
+ */
+async function isActiveFarm(farmId) {
+  const { Types } = require('mongoose');
+  const since = new Date(Date.now() - 30 * 86400000);
+  const agg = await Log.aggregate([
+    { $match: { farmId: new Types.ObjectId(String(farmId)), estimated: { $ne: true }, at: { $gte: since } } },
+    { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$at' } } } },
+    { $count: 'days' },
+  ]);
+  return (agg[0]?.days || 0) >= zu.ACTIVE_LOGGING_DAYS;
+}
+
+api.get('/farm/:farmId/zu', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const farm = await Farm.findById(req.params.farmId).select('rung rungPaidUntil rungProvisionalUntil payTo').lean();
+  const day = zuDayKey();
+  const [balance, claims, movements, active, collectedToday] = await Promise.all([
+    money.balance({ farmId: req.params.farmId }),
+    ZuClaim.find({ farmId: req.params.farmId }).sort({ createdAt: -1 }).limit(20).lean(),
+    money.history({ farmId: req.params.farmId, limit: 20 }),
+    isActiveFarm(req.params.farmId),
+    money.dailyClaimed({ farmId: req.params.farmId, day }),
+  ]);
+  // Resolve through the ladder so EVERY surface agrees: a lapsed paid period, an
+  // expired provisional rung and a paused farm all read the same here as in /me.
+  const eff = ladder.effectiveRung(await farmWithActivity(farm));
+  const paidUntil = farm?.rungPaidUntil ? new Date(farm.rungPaidUntil) : null;
+  const provUntil = farm?.rungProvisionalUntil ? new Date(farm.rungProvisionalUntil) : null;
+  return ok(res, {
+    balance,
+    ...zu.publicShape(),
+    rung: eff.rung,
+    storedRung: eff.stored,
+    paidUntil,
+    paid: eff.paid,
+    provisional: eff.provisional,
+    provisionalUntil: provUntil,
+    expired: eff.expired,
+    paused: eff.paused,
+    payTo: farm?.payTo || '',
+    // THE REFILL: what today's allowance is worth to THIS farm and whether he has
+    // taken it. One tap in the app; the unique index makes a double tap harmless.
+    allowance: { amount: zu.dailyAllowanceFor(active), active, day, collectedToday },
+    claims: claims.map(shapeClaim),
+    movements,
+  });
+}));
+
+// ── THE DAILY ALLOWANCE — THE REFILL (claimed, not minted silently) ───────────
+// Ported from Zyppar's `claimTopUp()`: the farmer TAPS to collect, so he watches the
+// balance grow and the habit is the product. One per farm per day, locked by a
+// unique index rather than a check-then-write.
+//
+// IT IS CLAIMABLE EVEN WHILE THE COLLECTION DOOR IS CLOSED, and that is on purpose:
+// before collection details are published a farmer would otherwise have NO route to
+// ZU at all and the paid rungs would be unreachable by every path. This is the one
+// door that is always open, and it is the honest alternative to a shortcut.
+api.post('/farm/:farmId/zu/daily', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const day = zuDayKey();
+  const active = await isActiveFarm(req.params.farmId);
+  const amount = zu.dailyAllowanceFor(active);
+  const r = await money.claimDaily({ farmId: req.params.farmId, amountZU: amount, day });
+  if (r.ok) {
+    return ok(res, { credited: r.credited, balance: r.balance, day, active, amount });
+  }
+  if (r.already) {
+    // Idempotent, and honest about it rather than a silent second credit.
+    return ok(res, { credited: 0, already: true, balance: r.balance, day, active, amount });
+  }
+  return bad(res, 400, r.error || 'the allowance could not be credited');
+}));
+
+// ALIAS — the app's older `/money` read keeps working, answered in ZU. Nothing
+// in the app needs to break on the day the rail disappears.
+api.get('/farm/:farmId/money', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const balance = await money.balance({ farmId: req.params.farmId });
+  return ok(res, { mode: 'zu', balance, balances: { zu: balance }, ...zu.publicShape() });
+}));
+
+// THE CLAIM — the payer tells us he has paid. It credits NOTHING: a claim is a
+// request to be checked, and only the operator's confirm turns it into money.
+api.post('/farm/:farmId/zu/claim', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  if (!zu.collectionOpen()) {
+    return bad(res, 503, 'the ZU door is not open yet — no collection details have been published');
+  }
+  const pack = zu.PACKS.find((p) => p.id === String(req.body?.packId || '').trim());
+  const amount = pack ? pack.zu : Math.max(0, Math.floor(Number(req.body?.zu) || 0));
+  if (!amount) return bad(res, 400, 'choose a pack');
+  const reference = String(req.body?.reference || '').trim().slice(0, 80);
+  if (!reference) return bad(res, 400, 'the reference from your payment is required — it is what we match on');
+  const claim = await ZuClaim.create({
+    farmId: req.params.farmId,
+    memberId: req.auth.mid || null,
+    packId: pack?.id || '',
+    zu: amount,
+    usd: zu.usdFor(amount),
+    method: String(req.body?.method || '').slice(0, 60),
+    reference,
+    note: String(req.body?.note || '').slice(0, 400),
+  });
+  return ok(res, {
+    claim: shapeClaim(claim),
+    note: 'Your claim is filed. ZU is credited once it has been checked against our account.',
+  });
+}));
+
+// ── THE OPERATOR'S DOOR (admin key). Confirming is the ONLY thing that credits.
+api.get('/zu/claims', wrap(async (req, res) => {
+  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || req.query?.key || ''));
+  if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+  const wanted = String(req.query?.status || 'claimed');
+  const status = ['claimed', 'confirmed', 'rejected'].includes(wanted) ? wanted : 'claimed';
+  const claims = await ZuClaim.find({ status }).sort({ createdAt: 1 }).limit(100).lean();
+  return ok(res, { status, claims: claims.map(shapeClaim) });
+}));
+
+api.post('/zu/claims/:id/confirm', wrap(async (req, res) => {
+  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || req.body?.key || ''));
+  if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+
+  // DECIDE FIRST, atomically: `status: 'claimed'` in the filter means an operator's
+  // double-tap can never credit twice (the A5 lesson — a check-then-write alone
+  // can be won twice).
+  const claim = await ZuClaim.findOneAndUpdate(
+    { _id: req.params.id, status: 'claimed' },
+    { $set: { status: 'confirmed', decidedBy: 'operator', decidedAt: new Date() } },
+    { new: true },
+  );
+  if (!claim) return bad(res, 409, 'that claim is not open (already decided, or unknown)');
+
+  const credited = await money.award({
+    farmId: claim.farmId,
+    amountZU: claim.zu,
+    ref: claim.reference,
+    note: `ZU ${claim.zu} credited (${claim.packId || 'custom'})`,
+  });
+  if (!credited.ok) {
+    // Roll the decision back so the operator can retry. A claim marked confirmed
+    // that credited nothing would be a lie in the books.
+    await ZuClaim.updateOne(
+      { _id: claim._id },
+      { $set: { status: 'claimed', decidedBy: '', decidedAt: null } },
+    );
+    return bad(res, 500, credited.error || 'the credit failed');
+  }
+  return ok(res, { balance: credited.balance });
+}));
+
+api.post('/zu/claims/:id/reject', wrap(async (req, res) => {
+  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || req.body?.key || ''));
+  if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+  const claim = await ZuClaim.findOneAndUpdate(
+    { _id: req.params.id, status: 'claimed' },
+    {
+      $set: {
+        status: 'rejected', decidedBy: 'operator', decidedAt: new Date(),
+        reason: String(req.body?.reason || '').slice(0, 200),
+      },
+    },
+    { new: true },
+  );
+  if (!claim) return bad(res, 409, 'that claim is not open (already decided, or unknown)');
+  return ok(res, { ok: true });
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1960,10 +2365,13 @@ api.get('/shop/:slug', wrap(async (req, res) => {
     projection.buyerRecords(farm._id, { lang }),
   ]);
   return ok(res, {
-    farm: projection.publicFarm(farm),   // ALLOWLIST ONLY
+    farm: projection.publicFarm(farm),   // ALLOWLIST ONLY — carries the farmer's own payTo words
     availability,
     records,
-    moneyMode: money.modeFor(farm),
+    // NO `moneyMode` (2026-10-11): there is no rail for Farmline to name. What the
+    // buyer actually needs is the FARMER's own payment instruction, which rides
+    // `farm.payTo` out of the allowlist — text the farmer wrote, shown as text,
+    // never read by our code to initiate or verify anything.
   });
 }));
 
@@ -2017,7 +2425,11 @@ api.post('/shop/:slug/order', auth.requireAuth('customer', 'farmer'), wrap(async
         note: String(req.body?.note || '').slice(0, 300),
         stage: 1,
         stageHistory: [{ stage: 1, at: new Date() }],
-        payment: { mode: money.modeFor(farm), status: 'unpaid' },
+        // THE FARMER'S OWN CLAIM (2026-10-11). Farmline runs no rail between this
+        // buyer and this farmer, so Farmline does not assert whether money moved.
+        // 'direct' means: the buyer settles on the farmer's own terms, published
+        // as the farmer's own payTo words. `stage` (0..5) is the operational truth.
+        payment: { mode: 'direct', status: 'unpaid' },
       });
     } catch (e) {
       if (e?.code !== 11000) throw e;   // a real failure is not a collision
@@ -2025,28 +2437,19 @@ api.post('/shop/:slug/order', auth.requireAuth('customer', 'farmer'), wrap(async
   }
   if (!order) return bad(res, 500, 'the order reference collided four times — please try again');
 
-  // Payment is attempted only when asked for, and a failure never destroys the
-  // order — the farmer still gets the work, which is the point of the app.
-  let payment = null;
-  if (req.body?.pay) {
-    const customer = req.auth.typ === 'customer' ? await Customer.findById(req.auth.sub) : null;
-    payment = await money.charge({ farm, customer, order, amountKES: total, phone: req.body?.phone });
-    order.payment.status = payment.status === 'paid' ? 'paid' : (payment.ok ? 'pending' : 'unpaid');
-    order.payment.ref = payment.ref || '';
-    if (payment.status === 'paid') order.payment.paidAt = new Date();
-    await order.save();
-  }
+  // THE `pay` DOOR IS GONE (2026-10-11). It used to hand the buyer's phone number
+  // to our M-Pesa rail and ask their phone to pay the FARMER. Farmline is not
+  // between them, so there is nothing here to attempt: a `pay: true` in the body
+  // is now simply ignored, and the buyer is told to settle on the farmer's terms.
+  // Nothing is written to the ledger — no ZU moves for a farmer↔buyer settlement.
 
   return res.status(201).json({
     ok: true,
     order,
-    // A1: the client NEVER sees the CheckoutRequestID — the handle that could
-    // forge a settlement lives server-side only. The payment shape is explicit:
-    // mode, status, ref, message. Nothing raw from charge() passes through.
-    payment: payment ? {
-      mode: payment.mode, status: payment.status,
-      ref: payment.ref || '', message: payment.message || '',
-    } : null,
+    // NO payment object from a rail. What the buyer needs is the FARMER's own
+    // instruction; it rides the farm allowlist as `payTo`, and it is text.
+    payment: null,
+    payTo: String(farm.payTo || ''),
     farm: { name: farm.name, slug: farm.slug },
   });
 }));
@@ -2084,7 +2487,11 @@ api.get('/admin/farms', wrap(async (req, res) => {
   const logBy = new Map(logAgg.map((r) => [String(r._id), r.n]));
   const orderBy = new Map(orderAgg.map((r) => [String(r._id), r.n]));
   const withCounts = farms.map((f) => ({
-    id: f._id, name: f.name, slug: f.slug, rung: f.rung, moneyMode: money.modeFor(f),
+    id: f._id, name: f.name, slug: f.slug, rung: f.rung,
+    // THE OPERATOR'S VIEW OF THE MONEY (2026-10-11): no rail, no mode. What an
+    // operator actually needs to see is whether a farm is PAID up, and until when.
+    paid: !!(f.rungPaidUntil && new Date(f.rungPaidUntil).getTime() > Date.now()),
+    rungPaidUntil: f.rungPaidUntil || null,
     logs: logBy.get(String(f._id)) || 0,
     orders: orderBy.get(String(f._id)) || 0,
     createdAt: f.createdAt,
@@ -2165,7 +2572,11 @@ const { migrateLegacyIndexes } = require('./models');
 
 server.listen(config.port, () => {
   console.log(`farmline server on :${config.port}  (app at ${config.basePath}/, api at ${config.apiPrefix}/)`);
-  console.log(`  dbName=${config.dbName}  auth=${auth.authArmed ? 'ARMED' : 'OPEN (set AUTH_SECRET)'}  money=${config.moneyMode}  mpesa=${money.mpesaConfigured() ? 'configured' : 'not armed'}`);
+  // THE BOOT LINE (2026-10-11): it no longer reports a money mode or an M-Pesa
+  // rail, because there is neither. It reports the ONE money fact a monitor wants:
+  // whether the ZU door is open (collection details published) — without them no
+  // farmer can credit an account, and the paid rungs cannot be bought.
+  console.log(`  dbName=${config.dbName}  auth=${auth.authArmed ? 'ARMED' : 'OPEN (set AUTH_SECRET)'}  zu=${zu.collectionOpen() ? 'door open' : 'CLOSED (set FARMLINE_ZU_COLLECTION)'}  unit=${zu.ZU_PER_USD} ZU/USD`);
   console.log(`  chat=${io ? 'socket.io at /socket-farmline/ (+ REST)' : 'REST only (socket.io not installed)'}  env=${config.envName}`);
   migrateLegacyIndexes().catch((e) => console.warn('[farmline] index migration error:', e.message));
 });

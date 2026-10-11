@@ -99,15 +99,23 @@ const admin = get('FARMLINE_ADMIN_KEY');
 admin ? pass('FARMLINE_ADMIN_KEY set (admin routes reachable)')
       : soft('FARMLINE_ADMIN_KEY unset — /api/farmline/admin/* answers 403 (door sealed, never open)');
 
-const mode = get('MONEY_MODE') || 'virtual';
-['virtual', 'mpesa'].includes(mode) ? pass(`MONEY_MODE=${mode}`) : bad(`MONEY_MODE=${mode} is not virtual|mpesa`);
-if (mode === 'mpesa') {
-  const armed = ['MPESA_CONSUMER_KEY', 'MPESA_CONSUMER_SECRET', 'MPESA_SHORTCODE', 'MPESA_PASSKEY'].every((k) => get(k));
-  armed ? pass('M-Pesa credentials present — REAL MONEY will move')
-        : bad('MONEY_MODE=mpesa but the Daraja credentials are incomplete — switch back to virtual');
-} else {
-  pass('money is virtual (ZU) — no real money can move, by construction');
-}
+// ── THE ZU DOOR (the money doctrine, 2026-10-11) ────────────────────────────
+// There is no money mode to validate any more: the virtual/mpesa rail is DELETED,
+// not disabled. What matters now is whether the ZU door is OPEN — i.e. whether
+// collection details are published, because without them no farmer can credit an
+// account and no paid rung can be bought. Unset is not fatal (the free rungs work
+// forever), so it is reported honestly rather than failed.
+const zuCollection = get('FARMLINE_ZU_COLLECTION');
+zuCollection
+  ? pass('FARMLINE_ZU_COLLECTION set — the ZU door is open, farmers can credit an account')
+  : soft('FARMLINE_ZU_COLLECTION unset — the ZU door is CLOSED: the free rungs work, the paid ones cannot be bought yet');
+
+// The deleted rail's keys must not linger as if they still configured something.
+const staleRail = ['MONEY_MODE', 'ZU_PER_KES', 'MPESA_CONSUMER_KEY', 'MPESA_CONSUMER_SECRET',
+  'MPESA_SHORTCODE', 'MPESA_PASSKEY', 'MPESA_ENV', 'MPESA_CALLBACK_SECRET'].filter((k) => get(k));
+staleRail.length === 0
+  ? pass('no M-Pesa / money-mode keys remain in env (the rail is deleted, not disabled)')
+  : soft(`these env keys are now DEAD and can be removed: ${staleRail.join(', ')}`);
 
 // ── 4. database ───────────────────────────────────────────────────────────────
 console.log('\ndatabase');

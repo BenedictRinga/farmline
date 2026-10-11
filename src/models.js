@@ -34,11 +34,36 @@ const farmSchema = new Schema({
   // ── the ladder (see ladder.js) ──
   rung: { type: Number, default: 0, min: 0, max: 6 },
   rungAcceptedAt: { type: Date, default: null },
+  // THE PAID PERIOD (the ZU doctrine, 2026-10-11): a paid rung is bought with ZU
+  // for 30 days and then PAUSES — it never auto-bills, because the standing law
+  // is "nothing is ever charged silently". The buyer of that period is the farmer
+  // himself: ZU unlocks rungs. See src/zu.js for the prices and the packs.
+  rungPaidUntil: { type: Date, default: null },
+  // THE PROVISIONAL RUNG (the founder's ruling, 2026-10-11: the mid-season door
+  // grants "both"). A farmer who walks the mid-season AI estimate gets to FEEL the
+  // paid layer for PROVISIONAL_DAYS — but it is labelled provisional in his own UI,
+  // is never representable to a buyer as a verified rung, and EXPIRES into the
+  // honest path. It is a demonstration, not a purchase: the estimate buys a
+  // SCHEDULE, never HISTORY (estimated artifacts are excluded from readiness).
+  rungProvisionalUntil: { type: Date, default: null },
 
-  // ── money (AGENTS.md rule 2) ──
-  moneyMode: { type: String, enum: ['virtual', 'mpesa'], default: config.moneyMode },
-  zuBalance: { type: Number, default: 0 },      // virtual mode only
-  mpesa: { paybill: String, till: String, account: String },
+  // ── MONEY (rewritten 2026-10-11 — the ZU-only doctrine) ──────────────────────
+  // REMOVED and why: `moneyMode` was the virtual/mpesa rail toggle, and `mpesa`
+  // held the Daraja credentials used to ask a BUYER's phone to pay a FARMER. Both
+  // put Farmline between two third parties, which is the one thing the founder
+  // ruled out. The rail is deleted; the doctrine's rule is "whose money" — one
+  // direction, into our own account, for our own service.
+  //
+  // `zuBalance` was a STORED counter that contradicted the derived-balance law
+  // (a stored balance that disagrees with its history is how money bugs start).
+  // It is no longer written; the balance is derived from the Ledger on every read.
+  zuBalance: { type: Number, default: 0 },      // VESTIGIAL — do not write; use money.balance()
+  // THE FARMER'S OWN PAYMENT WORDS, for HIS buyers. Free text he writes himself
+  // (paybill / till / bank / Airtel Money / "cash at pickup"). Farmline stores it
+  // and shows it. Farmline NEVER reads it to initiate, verify or settle anything —
+  // that is the whole delineation, and this string is deliberately not structured
+  // so that no code can mistake it for an instruction.
+  payTo: { type: String, default: '', maxlength: 600 },
 
   // ── THE AI-VISION TIER (the founder, 2026-10-07: "provide for expansion for
   // AI to 'see' the farm through the device camera — compute, count, label,
@@ -257,6 +282,14 @@ const logSchema = new Schema({
   counterparty: { type: String, default: '' },
 
   note: { type: String, default: '' },
+  // ── THE HONESTY FLAG (the founder's ruling, 2026-10-11) ──────────────────────
+  // `estimated` marks a log farmline BACK-CALCULATED rather than the farmer
+  // witnessing it — the mid-season door writes these when it turns a photo into a
+  // plausible history. They are real value to the farmer (a schedule to work to)
+  // and they MUST NOT count toward readiness, or he could manufacture three weeks
+  // of history in an afternoon and buy the VERDICT badge on fiction. Readiness
+  // counts `estimated: false` only. See farmFacts() in src/index.js.
+  estimated: { type: Boolean, default: false, index: true },
   scheduledEventId: { type: Schema.Types.ObjectId, ref: 'ScheduledEvent', default: null },
 
   // OFFLINE-FIRST: the client mints these, so a replayed batch is idempotent.
@@ -350,35 +383,54 @@ const orderSchema = new Schema({
   note: { type: String, default: '' },
   stage: { type: Number, default: 1, min: 0, max: 5 },
   stageHistory: [{ stage: Number, at: { type: Date, default: Date.now } }],
+  // THE FARMER'S OWN CLAIM, not ours (the ZU doctrine, 2026-10-11): Farmline no
+  // longer runs a rail between this buyer and this farmer, so Farmline has no
+  // business asserting whether money moved. `mode` is 'direct' — the buyer paid
+  // the farmer on the farmer's own terms (his payTo text) — and the status is the
+  // farmer's word about his own business. The honest sentence is "the farmer says
+  // it is paid", never "farmline says it is paid". `stage` (0..5) remains the
+  // operational truth of the order.
   payment: {
-    mode: { type: String, enum: ['virtual', 'mpesa'], default: 'virtual' },
+    mode: { type: String, enum: ['virtual', 'mpesa', 'direct'], default: 'direct' },
     status: { type: String, enum: ['unpaid', 'pending', 'paid', 'failed'], default: 'unpaid' },
     ref: { type: String, default: '' },
     paidAt: { type: Date, default: null },
   },
 }, { timestamps: true });
 
-// ── THE LEDGER (mode-agnostic: same shape for ZU and M-Pesa) ──────────────────
+// ── THE LEDGER — FARMLINE'S OWN RECEIVABLE BOOK (rewritten 2026-10-11) ────────
+// One direction, one unit. Rows are ZU credited (the operator confirmed a claim)
+// and ZU spent (a paid rung opened). There is no mpesa mode, no CheckoutRequestID
+// and no receipt matching any more — those fields existed only to reconcile a
+// callback for money moving BETWEEN two third parties, and that callback is
+// deleted (see src/money.js for the why). `orderId`/`customerId` stay because
+// historical rows carry them; nothing writes them now.
 const ledgerSchema = new Schema({
   farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
   orderId: { type: Schema.Types.ObjectId, ref: 'Order', default: null },
   customerId: { type: Schema.Types.ObjectId, ref: 'Customer', default: null },
-  mode: { type: String, enum: ['virtual', 'mpesa'], required: true },
+  mode: { type: String, enum: ['virtual', 'mpesa'], required: true },   // 'virtual' IS ZU
   direction: { type: String, enum: ['in', 'out'], required: true },
   amountKES: money,
   amountZU: { type: Number, default: 0 },
-  ref: { type: String, default: '' },
+  ref: { type: String, default: '' },          // the receipt the operator matched
+  // THE DAILY ALLOWANCE LOCK (the refill, 2026-10-11). One allowance per farm per
+  // day, and the unique index below is the LOCK — not a check-then-write, which can
+  // be won twice by two taps racing. Only allowance rows carry it; every other row
+  // leaves it absent, which is what the partial filter keys on. (The 'sparse'
+  // lesson from Message.clientId applies: sparse skips MISSING fields only, so the
+  // default must be absent, and a partialFilterExpression states the intent.)
+  dailyKey: { type: String },
   status: { type: String, enum: ['pending', 'settled', 'failed'], default: 'pending' },
   note: { type: String, default: '' },
-  // ── M-PESA (Daraja) ─────────────────────────────────────────────────────────
-  // The callback arrives keyed on CheckoutRequestID, which is the ONLY handle that
-  // exists between "we asked the buyer for money" and "the money moved". A receipt
-  // number does not exist until the buyer has entered their PIN, so a pending entry
-  // cannot be matched by receipt — it has to be matched by this.
-  checkoutRequestId: { type: String, default: '', index: true },
-  mpesaReceipt: { type: String, default: '' },
   settledAt: { type: Date, default: null },
 }, { timestamps: true });
+
+// One allowance per farm per day. Two taps in the same second cannot both win.
+ledgerSchema.index(
+  { farmId: 1, dailyKey: 1 },
+  { unique: true, partialFilterExpression: { dailyKey: { $type: 'string' } } },
+);
 
 // ── PRICE OBSERVATIONS (market awareness, Rung 3+) ────────────────────────────
 const priceSchema = new Schema({
@@ -571,6 +623,34 @@ const ratingSchema = new Schema({
   history: [{ value: { type: Number, min: 1, max: 5 }, at: { type: Date, default: Date.now } }],
 }, { timestamps: true });
 
+// ── THE ZU CLAIM (2026-10-11 — the money doctrine's ONE door) ────────────────
+// The doctrine (D:\TODOs\farmline-zu-doctrine-20261011.md): Farmline sells only
+// ZU, money moves only user → Farmline, and there is NO payment provider in the
+// path — a provider, if ever added, automates confirmation and nothing else.
+//
+// So a top-up is a CLAIM, then a FACT:
+//   · the farmer pays US directly (our published collection details) and files a
+//     claim with the reference he was given → status 'claimed' → credits NOTHING;
+//   · the operator checks it against our own account and CONFIRMS → the ZU is
+//     credited through the ledger and the row keeps the reference as the receipt.
+// A claim is a request to be checked. It is never money, and it never becomes
+// money without a human on our side saying so.
+const zuClaimSchema = new Schema({
+  farmId: { type: Schema.Types.ObjectId, ref: 'Farm', required: true, index: true },
+  memberId: { type: Schema.Types.ObjectId, ref: 'Member', default: null },
+  packId: { type: String, default: '' },
+  zu: { type: Number, required: true, min: 1 },       // the ZU being claimed for
+  usd: { type: Number, default: 0 },                  // the receipt's USD reference, never a price
+  method: { type: String, default: '' },              // free text, the payer's own words
+  reference: { type: String, default: '' },           // THE receipt — what we match against
+  note: { type: String, default: '', maxlength: 400 },
+  status: { type: String, enum: ['claimed', 'confirmed', 'rejected'], default: 'claimed', index: true },
+  decidedBy: { type: String, default: '' },
+  decidedAt: { type: Date, default: null },
+  reason: { type: String, default: '' },              // on reject — the honest why
+}, { timestamps: true });
+zuClaimSchema.index({ farmId: 1, status: 1 });
+
 module.exports = {
   conn,
   migrateLegacyIndexes,
@@ -594,4 +674,5 @@ module.exports = {
   FeedbackMsg: conn.model('FeedbackMsg', feedbackMsgSchema),
   MetaCounter: conn.model('MetaCounter', metaCounterSchema),
   Rating: conn.model('Rating', ratingSchema),
+  ZuClaim: conn.model('ZuClaim', zuClaimSchema),
 };

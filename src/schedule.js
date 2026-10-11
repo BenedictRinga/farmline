@@ -154,7 +154,7 @@ function findProtocol(species, intervention) {
  *   4. schedules the next occurrence for interval protocols
  *   5. stamps the farm's confidence clock
  */
-async function complete({ farm, eventId, byMemberId = null, productUsed = '', speciesHint = '', noteExtra = '', clientId = '' }) {
+async function complete({ farm, eventId, byMemberId = null, productUsed = '', speciesHint = '', noteExtra = '', clientId = '', estimated = false }) {
   // A5 (the GLM audit, 2026-10-10): THE CLAIM IS ATOMIC — findOneAndUpdate gated
   // on the still-open statuses, so two concurrent requests cannot both win. A null
   // claim is the honest "already done" (the double-tap and the TRY-AGAIN retry
@@ -210,6 +210,13 @@ async function complete({ farm, eventId, byMemberId = null, productUsed = '', sp
     note: `from the schedule: ${proto?.en || ev.intervention}${noteExtra ? ` — ${noteExtra}` : ''}`,
     scheduledEventId: ev._id,
     clientId: clientId || undefined,
+    // BORN MARKED (the founder's ruling, 2026-10-11: "readiness must exclude
+    // estimated artifacts or we allow a monster"). When this record comes from the
+    // MID-SEASON estimate — a step farmline back-calculated instead of the farmer
+    // witnessing it — it is stamped at birth so readiness can never count it as
+    // history. Marking it afterwards would leave a window where a fake week looks
+    // like a real one, and readiness is read by a different request.
+    estimated: !!estimated,
   });
 
   // 3. the hold — the compliance payload.

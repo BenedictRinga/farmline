@@ -35,6 +35,13 @@ const CUSTOMER_FARM_FIELDS = [
   // layer's first movement, and until now the buyer never received it: the
   // allowlist carried the old Photo Kit array only. One field opens; nothing else does.
   'photo',
+  // THE FARMER'S OWN PAYMENT WORDS (the ZU doctrine, 2026-10-11). This is the ONE
+  // thing that replaces the deleted rail: the buyer is told, in the FARMER's own
+  // words, how to pay HIM — paybill/till/bank/Airtel/"cash at pickup". It is a
+  // free-text string the farmer wrote. Farmline never parses it, never acts on
+  // it, and never guarantees it: we show a farmer's instruction, we do not
+  // participate in the payment. Displays as text; that is the whole contract.
+  'payTo',
 ];
 
 /** Strip a Farm document down to the customer allowlist. */

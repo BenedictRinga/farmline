@@ -181,162 +181,246 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     bad(`socket test could not run: ${e.message}`);
   }
 
-  // ── 6. M-PESA — the parts that must not be wrong ──────────────────────────
-  console.log('\nM-Pesa (Daraja)');
-  const mpesa = require('../src/mpesa');
-
-  const phones = [
-    ['0712345678', '254712345678'], ['+254712345678', '254712345678'],
-    ['254712345678', '254712345678'], ['712345678', '254712345678'],
-    ['07 12 345 678', '254712345678'], ['0112345678', '254112345678'],
-  ];
-  const badPhones = phones.filter(([input, want]) => mpesa.normalizePhone(input) !== want);
-  badPhones.length === 0
-    ? ok(`all ${phones.length} Kenyan phone shapes normalise to 254…`)
-    : bad(`phone normalisation wrong for: ${badPhones.map((p) => p[0]).join(', ')}`);
-  mpesa.normalizePhone('12345') === null ? ok('a nonsense number is rejected, not mangled') : bad('a nonsense number was accepted');
-
-  /^\d{14}$/.test(mpesa.darajaTimestamp())
-    ? ok(`timestamp is Daraja-shaped (${mpesa.darajaTimestamp()})`)
-    : bad('the timestamp is not YYYYMMDDHHmmss');
-
-  const pw = mpesa.stkPassword('174379', 'passkey', '20260101120000');
-  Buffer.from(pw, 'base64').toString() === '174379passkey20260101120000'
-    ? ok('the STK password is base64(shortcode+passkey+timestamp)')
-    : bad('the STK password is wrong');
-
-  const success = mpesa.parseCallback({
-    Body: { stkCallback: { CheckoutRequestID: 'ws_CO_1', ResultCode: 0, ResultDesc: 'ok',
-      CallbackMetadata: { Item: [
-        { Name: 'MpesaReceiptNumber', Value: 'RJ41ABC123' },
-        { Name: 'Amount', Value: 900 }, { Name: 'PhoneNumber', Value: 254712345678 },
-        { Name: 'TransactionDate', Value: 20261003120000 }] } } },
-  });
-  success.ok && success.receipt === 'RJ41ABC123' && success.amount === 900
-    ? ok('a successful callback parses to a receipt + amount')
-    : bad(`callback parse wrong: ${JSON.stringify(success)}`);
-
-  const cancelled = mpesa.parseCallback({ Body: { stkCallback: { CheckoutRequestID: 'ws_CO_2', ResultCode: 1032, ResultDesc: 'Cancelled' } } });
-  !cancelled.ok && /cancel/i.test(cancelled.message)
-    ? ok(`a cancelled payment is a FAILURE with a human reason ("${cancelled.message}")`)
-    : bad('a cancelled payment would read as success');
-
-  // THE ONE THAT MATTERS: unarmed must never claim success.
-  const armedHere = (await call('GET', '/version')).body?.mpesaConfigured;
-  const farm = { _id: farmId, moneyMode: 'mpesa', name: 'Chat Farm' };
+  // ── 6. ZU — FARMLINE'S OWN UNIT (the money doctrine, 2026-10-11) ──────────
+  // What is tested here, and why: Farmline no longer runs a rail between a buyer
+  // and a farmer, so there is no M-Pesa parsing, no phone normalisation, no STK
+  // password and no callback left to prove. The properties that MUST hold now are
+  // the doctrine's own — and these are the ones a future session must not break:
+  //   · ZU is one US cent, and the pack ladder reaches the paid rungs;
+  //   · a balance counts SETTLED rows only;
+  //   · a filed claim credits NOTHING;
+  //   · a confirmed claim cannot be credited twice;
+  //   · a spend refuses honestly when short and moves nothing.
+  console.log('\nZU — the unit, the door, the paid rungs');
+  const zu = require('../src/zu');
   const moneyMod = require('../src/money');
-  const attempt = await moneyMod.charge({
-    farm, customer: null, order: { _id: farmId, ref: 'FL-TEST' }, amountKES: 900, mode: 'mpesa', phone: '0712345678',
-  });
-  if (!armedHere) {
-    attempt.ok === false
-      ? ok('an UNARMED M-Pesa rail refuses — it does NOT report a fake success')
-      : bad('THE UNARMED RAIL REPORTED SUCCESS — the worst possible bug on a money path');
-    info(`unarmed answer: "${attempt.message}"`);
-  } else {
-    info(`this deployment HAS M-Pesa credentials — the push returned ${attempt.status}`);
-    attempt.status === 'pending'
-      ? ok('a real push returns PENDING, not paid (only the callback settles)')
-      : bad(`a real push returned "${attempt.status}" — success must come only from the callback`);
-  }
 
-  // ── THE BALANCE READS ONLY SETTLED MONEY (the audit's fix, 2026-10-08) ──
-  // The mpesa rail writes PENDING (PIN not yet entered) and FAILED (refused
-  // push) rows direction 'in'; the old aggregate counted them as RECEIVED.
+  zu.ZU_PER_USD === 100
+    ? ok('1 ZU is one US cent (ZU_PER_USD = 100)')
+    : bad(`the unit moved: ZU_PER_USD=${zu.ZU_PER_USD}`);
+
+  Object.keys(zu.RUNG_ZU).length === 4
+    ? ok(`the four paid rungs carry ZU prices (${Object.entries(zu.RUNG_ZU).map(([k, v]) => `${k} ${v}`).join(', ')})`)
+    : bad('the paid rungs are not all priced in ZU');
+
+  // A LADDER, NOT A FLAT UNIT: each bigger pack must give at least as many ZU per
+  // USD as the one below it. (The comparison is `>=` — the first draft had it
+  // backwards, which passed everything and proved nothing.)
+  zu.PACKS.every((p, i, a) => i === 0 || p.zu / p.usd >= a[i - 1].zu / a[i - 1].usd - 1e-9)
+    ? ok(`every bigger pack gives a better rate (${zu.PACKS.map((p) => (p.zu / p.usd).toFixed(1)).join(' → ')} ZU/USD)`)
+    : bad('a bigger pack is worse value — the ladder is inverted');
+
+  zu.PACKS[0].zu >= zu.RUNG_ZU.verdict
+    ? ok(`the smallest pack (${zu.PACKS[0].zu} ZU) reaches the first paid rung (${zu.RUNG_ZU.verdict} ZU) — the small first step`)
+    : bad('the smallest pack cannot reach the first paid rung');
+
+  // NO LOCAL CURRENCY ANYWHERE (the founder's rule: "no local currency to
+  // Farmline direct"). The shape the app renders must not carry a price in KES,
+  // NGN or USD — only the ZU and the unit it is pegged to.
+  !/KES|NGN|₦|KSh/.test(JSON.stringify(zu.publicShape()))
+    ? ok('the public ZU shape carries NO local-currency price (ZU only)')
+    : bad('THE PUBLIC ZU SHAPE LEAKED A LOCAL-CURRENCY PRICE');
+
+  // ── THE BALANCE READS ONLY SETTLED MONEY (the lesson kept from the old file) ──
   // Proven at the module level against THROWAWAY ledger rows (a probe farm id
   // that exists nowhere else), created and deleted inside this block.
   {
     const mongoose = require('mongoose');
     const { Ledger } = require('../src/models');
-    const moneyMod2 = require('../src/money');
     const probeId = new mongoose.Types.ObjectId();
     try {
       await Ledger.insertMany([
-        { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 1000, ref: 'FL-BAL-SETTLED', status: 'settled' },
-        { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 400, ref: 'FL-BAL-PENDING', status: 'pending', checkoutRequestId: 'ws_BAL_P' },
-        { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 250, ref: 'FL-BAL-FAILED', status: 'failed' },
+        { farmId: probeId, mode: 'virtual', direction: 'in', amountZU: 1000, ref: 'ZU-BAL-SETTLED', status: 'settled' },
+        { farmId: probeId, mode: 'virtual', direction: 'in', amountZU: 400, ref: 'ZU-BAL-PENDING', status: 'pending' },
+        { farmId: probeId, mode: 'virtual', direction: 'in', amountZU: 250, ref: 'ZU-BAL-FAILED', status: 'failed' },
+        { farmId: probeId, mode: 'virtual', direction: 'out', amountZU: 300, ref: 'ZU-BAL-SPENT', status: 'settled' },
       ]);
-      const bal = await moneyMod2.balance({ ownerType: 'farm', ownerId: probeId, mode: 'mpesa' });
-      bal === 1000
-        ? ok('the mpesa balance counts SETTLED money only (pending/failed excluded)')
-        : bad(`THE BALANCE COUNTS MONEY THAT DID NOT MOVE — got ${bal}, want 1000`);
+      const bal = await moneyMod.balance({ farmId: probeId });
+      bal === 700
+        ? ok('the ZU balance counts SETTLED rows only, both directions (1000 − 300)')
+        : bad(`THE BALANCE COUNTS WHAT DID NOT MOVE — got ${bal}, want 700`);
     } finally {
       await Ledger.deleteMany({ farmId: probeId }).catch(() => {});
     }
   }
+  // ── THE CLAIM → CONFIRM DOOR (the doctrine's ONE money door) ────────────────
+  // A claim is a REQUEST TO BE CHECKED. It credits nothing. Only the operator's
+  // confirm turns it into money — and a confirm can never credit twice.
+  {
+    const mongoose = require('mongoose');
+    const { Ledger, ZuClaim } = require('../src/models');
+    const config = require('../src/config');
+    const adminKey = config.envVar('FARMLINE_ADMIN_KEY');
+    const probeId = new mongoose.Types.ObjectId();
 
-  // ── A1: THE CALLBACK FORGERY IS CLOSED (the audit, 2026-10-10) ──────────────
-  // Three proofs against throwaway rows + the response-shape proof over HTTP:
-  // the secret segment gates the door; an unknown CheckoutRequestID touches
-  // nothing; a SHORTFALL is a FAILURE with the mismatch note, never a settlement;
-  // a repeat callback is idempotent; and the order response never carries the
-  // checkoutRequestId the forge would need.
+    try {
+      // ── THE TWO VERBS, at the module level where the invariants live ────────
+      const a = await moneyMod.award({ farmId: probeId, amountZU: 600, ref: 'ZU-TEST', note: 'test credit' });
+      a.ok && a.balance === 600
+        ? ok('award() credits ZU and reports the new balance')
+        : bad(`award() wrong: ${JSON.stringify(a)}`);
+
+      const short = await moneyMod.spend({ farmId: probeId, amountZU: 900, ref: 'rung-verdict' });
+      short.ok === false && short.short === 300
+        ? ok('spend() refuses honestly when short and NAMES the shortfall (300 ZU)')
+        : bad(`spend() did not refuse honestly: ${JSON.stringify(short)}`);
+      (await moneyMod.balance({ farmId: probeId })) === 600
+        ? ok('a refused spend moves NOTHING')
+        : bad('A REFUSED SPEND MOVED MONEY');
+
+      const spent = await moneyMod.spend({ farmId: probeId, amountZU: zu.RUNG_ZU.verdict, ref: 'rung-verdict' });
+      spent.ok && spent.balance === 600 - zu.RUNG_ZU.verdict
+        ? ok(`spend() deducts exactly the rung price (${zu.RUNG_ZU.verdict} ZU) leaving ${spent.balance}`)
+        : bad(`spend() wrong: ${JSON.stringify(spent)}`);
+
+      // ── THE DOOR ITSELF ────────────────────────────────────────────────────
+      if (!zu.collectionOpen()) {
+        const closed = await call('POST', `/farm/${farmId}/zu/claim`, { packId: 'starter', reference: 'REF-CLOSED' }, farmerTok);
+        closed.status === 503
+          ? ok('with no collection details published the door answers 503 honestly — it never invents an account')
+          : bad(`the closed door answered ${closed.status} — it must refuse, not improvise`);
+        // And the door is FARMER-side: a buyer's token must not reach it at all.
+        const asBuyer = await call('POST', `/farm/${farmId}/zu/claim`, { packId: 'starter', reference: 'REF-BUYER' }, tokA);
+        asBuyer.status === 403
+          ? ok('a BUYER token is refused at the ZU door (403) — ZU is bought by the farm, not by the storefront')
+          : bad(`a buyer token reached the ZU door (${asBuyer.status}) — the wrong side of the app let it in`);
+        info('set FARMLINE_ZU_COLLECTION in .env to exercise the live claim→confirm legs');
+      } else {
+        const before = await moneyMod.balance({ farmId });
+        const filed = await call('POST', `/farm/${farmId}/zu/claim`, { packId: 'starter', method: 'bank', reference: 'REF-' + Date.now() }, farmerTok);
+        if (filed.status === 200) {
+          ok('a claim is FILED (200) and keeps its reference as the receipt');
+          (await moneyMod.balance({ farmId })) === before
+            ? ok('A FILED CLAIM CREDITS NOTHING — a claim is not money')
+            : bad('A FILED CLAIM CREDITED ZU WITHOUT CONFIRMATION');
+
+          const claimId = filed.body?.claim?.id;
+          if (!adminKey) {
+            info('FARMLINE_ADMIN_KEY is not set — the operator-confirm legs are skipped');
+          } else {
+            const noKey = await call('POST', `/zu/claims/${claimId}/confirm`, {});
+            noKey.status === 401 || noKey.status === 403
+              ? ok(`a confirm WITHOUT the admin key is refused (${noKey.status})`)
+              : bad(`a confirm without the admin key answered ${noKey.status}`);
+
+            const confirmed = await call('POST', `/zu/claims/${claimId}/confirm`, { key: adminKey });
+            const after = await moneyMod.balance({ farmId });
+            confirmed.status === 200 && after === before + zu.PACKS[0].zu
+              ? ok(`the operator's confirm credits the pack (${zu.PACKS[0].zu} ZU)`)
+              : bad(`confirm did not credit: ${confirmed.status}, balance ${after}, want ${before + zu.PACKS[0].zu}`);
+
+            const twice = await call('POST', `/zu/claims/${claimId}/confirm`, { key: adminKey });
+            const afterTwice = await moneyMod.balance({ farmId });
+            twice.status === 409 && afterTwice === after
+              ? ok('confirming TWICE credits once (409, balance unchanged)')
+              : bad(`A DOUBLE CONFIRM CREDITED TWICE: ${twice.status}, balance ${afterTwice}`);
+          }
+        } else {
+          bad(`filing a claim answered ${filed.status}: ${filed.body?.error || ''}`);
+        }
+      }
+    } finally {
+      await Ledger.deleteMany({ farmId: probeId }).catch(() => {});
+      await ZuClaim.deleteMany({ farmId: probeId }).catch(() => {});
+    }
+  }
+
+  // ── 7. THE REFILL, THE LEDGER'S HONESTY, AND THE MID-SEASON DOOR (2026-10-11) ──
+  // These three are the founder's rulings, and each one has a failure mode that would
+  // be invisible in production: an allowance that pays twice, history that a photo can
+  // manufacture, and a rung that outlives the days someone paid for.
+  console.log('\nThe refill, honest readiness, and the mid-season door');
   {
     const mongoose = require('mongoose');
     const { Ledger } = require('../src/models');
-    const config = require('../src/config');
-    const secret = config.envVar('MPESA_CALLBACK_SECRET') || config.envVar('AUTH_SECRET') || '';
+    const ladder = require('../src/ladder');
+
+    // ── THE DAILY ALLOWANCE ────────────────────────────────────────────────────
+    // It must be claimable with the COLLECTION DOOR CLOSED (otherwise, before
+    // collection details are published, no farmer has any route to ZU at all).
+    const d1 = await call('POST', `/farm/${farmId}/zu/daily`, {}, farmerTok);
+    d1.status === 200 && d1.body?.credited > 0
+      ? ok(`the daily allowance is claimable (${d1.body.credited} ZU) — and with the door closed, which is the point`)
+      : bad(`the allowance refused: ${d1.status} ${JSON.stringify(d1.body || {})}`);
+    const afterFirst = d1.body?.balance;
+
+    // THE ONE THAT MATTERS: a second tap the same day pays NOTHING. The lock is the
+    // unique index, not a check-then-write, so two taps racing cannot both win.
+    const d2 = await call('POST', `/farm/${farmId}/zu/daily`, {}, farmerTok);
+    d2.status === 200 && d2.body?.already === true && d2.body?.credited === 0
+      ? ok('a second tap the same day credits 0 and SAYS SO (already collected)')
+      : bad(`THE ALLOWANCE PAID TWICE: ${JSON.stringify(d2.body)}`);
+    const afterSecond = (await call('GET', `/farm/${farmId}/zu`, null, farmerTok)).body?.balance;
+    afterSecond === afterFirst
+      ? ok(`the balance did not move on the second tap (${afterSecond} ZU)`)
+      : bad(`THE BALANCE MOVED ON A REPEAT TAP: ${afterFirst} -> ${afterSecond}`);
+    (await call('GET', `/farm/${farmId}/zu`, null, farmerTok)).body?.allowance?.collectedToday === true
+      ? ok('the door reports today as already collected')
+      : bad('the door does not know today was collected — the app would offer it again');
+
+    // A BUYER MUST NOT COLLECT A FARM'S ALLOWANCE.
+    const asBuyer = await call('POST', `/farm/${farmId}/zu/daily`, {}, tokA);
+    asBuyer.status === 403
+      ? ok('a BUYER token cannot claim a farm allowance (403)')
+      : bad(`a buyer claimed a farm allowance (${asBuyer.status})`);
+
+    // ── READINESS CANNOT BE MANUFACTURED (the founder's ruling #3) ──────────────
+    // The mid-season door writes back-calculated logs. If those counted, a farmer
+    // could buy the VERDICT badge on an afternoon of fiction. farmFacts excludes them
+    // — and the PURE half of that claim is provable here: with LOW confidence the
+    // engine never recommends past SHARPEN, whatever else is present.
+    const thin = ladder.readiness({ logs30d: 40, daysOfHistory: 60, sellables: 3, plots: 1, confidence: 'low' });
+    thin.recommended <= 2
+      ? ok(`thin-confidence facts never recommend a paid rung (recommended ${thin.recommended})`)
+      : bad(`READINESS RECOMMENDED ${thin.recommended} ON LOW CONFIDENCE`);
+
+    // And the exclusion itself, at the data layer: an ESTIMATED log must not be
+    // countable as history. Proven by writing both kinds and asking the same
+    // question the engine asks.
     const probeId = new mongoose.Types.ObjectId();
-    const envelope = (crid, amount) => ({ Body: { stkCallback: { CheckoutRequestID: crid, ResultCode: 0, ResultDesc: 'ok',
-      CallbackMetadata: { Item: [{ Name: 'MpesaReceiptNumber', Value: 'RJ' + String(crid).slice(-6) }, { Name: 'Amount', Value: amount }] } } } });
-
-    // The order-response shape: the DEMO shop carries real inventory, so an order
-    // there reaches the 201 with a payment attempt — the body must not carry the
-    // handle a forge would need.
-    const demo = await call('POST', '/auth/demo', {});
-    const demoSlug = demo.body?.farm?.slug;
-    const demoOrd = demoSlug
-      ? await call('POST', `/shop/${demoSlug}/order`, { lines: [{ product: 'milk', qty: 1 }], pay: true, phone: '0712345678' }, tokA)
-      : { status: 0, body: {} };
-    if (!demoSlug) info('the demo farm is not seeded — the order-shape leg skipped');
-    else if (demoOrd.status === 201) {
-      !JSON.stringify(demoOrd.body).includes('checkoutRequestId')
-        ? ok('the order response carries NO checkoutRequestId (the forge handle is server-side only)')
-        : bad('the order response LEAKS the settlement handle');
-    } else {
-      info(`the demo order answered ${demoOrd.status} (${demoOrd.body?.error || 'no lines available'}) — the shape leg skipped honestly`);
+    try {
+      const { Log } = require('../src/models');
+      await Log.insertMany([
+        { farmId: probeId, kind: 'note', at: new Date(), estimated: true },
+        { farmId: probeId, kind: 'note', at: new Date(), estimated: true },
+        { farmId: probeId, kind: 'note', at: new Date(), estimated: true },
+        { farmId: probeId, kind: 'note', at: new Date(), estimated: false },
+      ]);
+      const real = await Log.countDocuments({ farmId: probeId, estimated: { $ne: true } });
+      const all = await Log.countDocuments({ farmId: probeId });
+      real === 1 && all === 4
+        ? ok('estimated records are EXCLUDED from history (4 written, 1 counted)')
+        : bad(`THE EXCLUSION IS WRONG: ${all} written, ${real} counted (want 1 of 4)`);
+    } finally {
+      const { Log } = require('../src/models');
+      await Log.deleteMany({ farmId: probeId }).catch(() => {});
     }
 
-    const legacy = await call('POST', '/mpesa/callback', envelope('ws_A1_KNOWN', 500));
-    legacy.status === 403
-      ? ok('the LEGACY callback path fails closed (403) — a stale Daraja registration cannot settle')
-      : bad(`the legacy callback path answered ${legacy.status} — the forgery door is still open`);
-
-    if (secret) {
-      try {
-        await Ledger.insertMany([
-          { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 500, ref: 'FL-A1-KNOWN', status: 'pending', checkoutRequestId: 'ws_A1_KNOWN' },
-          { farmId: probeId, mode: 'mpesa', direction: 'in', amountKES: 500, ref: 'FL-A1-SHORT', status: 'pending', checkoutRequestId: 'ws_A1_SHORT' },
-        ]);
-        const seg = encodeURIComponent(secret);
-        const wrong = await call('POST', '/mpesa/callback/WRONGSEG', envelope('ws_A1_KNOWN', 500));
-        wrong.status === 403
-          ? ok('a WRONG secret segment is refused (403)')
-          : bad(`a wrong secret segment answered ${wrong.status} — the door is decorative`);
-        const unknown = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_UNKNOWN', 500));
-        unknown.status === 200 && unknown.body?.matched === 0
-          ? ok('an UNKNOWN CheckoutRequestID is answered but matches nothing')
-          : bad(`an unknown id answered ${unknown.status} matched ${unknown.body?.matched}`);
-        const good = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_KNOWN', 500));
-        const settled = await Ledger.findOne({ checkoutRequestId: 'ws_A1_KNOWN' }).lean();
-        good.status === 200 && settled?.status === 'settled'
-          ? ok('a well-formed callback SETTLES the known pending row')
-          : bad(`the good callback did not settle (${good.status}, row ${settled?.status})`);
-        const short = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_SHORT', 100));
-        const shortRow = await Ledger.findOne({ checkoutRequestId: 'ws_A1_SHORT' }).lean();
-        shortRow?.status === 'failed' && /mismatch/i.test(shortRow?.note || '')
-          ? ok('a SHORTFALL callback is recorded FAILED with the mismatch note — never settled')
-          : bad(`THE SHORTFALL SETTLED (${shortRow?.status}) — goods for KES 100 of 500`);
-        const again = await call('POST', `/mpesa/callback/${seg}`, envelope('ws_A1_KNOWN', 500));
-        again.body?.already === true
-          ? ok('a repeated callback is idempotent (already settled, no re-settle)')
-          : bad(`a repeated callback answered ${JSON.stringify(again.body)} — Daraja retries must not re-settle`);
-      } finally {
-        await Ledger.deleteMany({ farmId: probeId }).catch(() => {});
-      }
-    } else {
-      info('no MPESA_CALLBACK_SECRET/AUTH_SECRET in this env — the with-secret A1 legs skipped');
-    }
+    // ── A RUNG DOES NOT OUTLIVE THE DAYS SOMEONE PAID FOR ───────────────────────
+    const day = 86400000;
+    const now = Date.now();
+    const r = (f, when) => ladder.effectiveRung(f, when);
+    r({ rung: 1 }, now).rung === 1 ? ok('a free rung is held with no payment (rung 1)') : bad('a free rung was downgraded');
+    r({ rung: 3, rungPaidUntil: new Date(now + 5 * day) }, now).rung === 3 ? ok('a live paid period holds the rung (3)') : bad('a live paid rung was downgraded');
+    const lapsed = r({ rung: 3, rungPaidUntil: new Date(now - day) }, now);
+    lapsed.rung === 2 && lapsed.expired
+      ? ok('a LAPSED paid period falls back to the free ceiling (3 → 2) and says it expired')
+      : bad(`A LAPSED PAID RUNG STILL READS AS HELD: ${JSON.stringify(lapsed)}`);
+    const prov = r({ rung: 3, rungProvisionalUntil: new Date(now + 5 * day) }, now);
+    prov.rung === 3 && prov.provisional === true
+      ? ok('a provisional rung holds AND is labelled provisional — the mid-season door')
+      : bad(`the provisional rung is not labelled: ${JSON.stringify(prov)}`);
+    const provGone = r({ rung: 3, rungProvisionalUntil: new Date(now - day) }, now);
+    provGone.rung === 2
+      ? ok('an EXPIRED provisional rung falls back to the free ceiling')
+      : bad(`an expired provisional rung still reads as held (${provGone.rung})`);
+    r({ rung: 6, isDemo: true }, now).rung === 6
+      ? ok('the DEMO keeps its rung — money rules never touch the visitor walk')
+      : bad('THE DEMO WAS DOWNGRADED BY A MONEY RULE');
+    // A paid farm is never demoted to provisional, and never upgraded for free.
+    prov.rung === r({ rung: 3, rungProvisionalUntil: new Date(now + day) }, now).rung
+      ? ok('the provisional path never demotes or invents a rung')
+      : bad('the provisional path changed the rung unexpectedly');
   }
 
   console.log(`\n${fail ? `CHAT+MONEY FAILED — ${fail} problem(s).` : 'CHAT+MONEY PASSED — both doors work, and the rail is honest.'}\n`);

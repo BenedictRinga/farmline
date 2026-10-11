@@ -134,7 +134,7 @@ function need(label, obj, fields) {
   need('GET /orders', orders.body, ['ok', 'orders']);
 
   const money = await call('GET', `/farm/${farmId}/money`, null, T);
-  need('GET /money', money.body, ['ok', 'mode', 'balances', 'mpesaConfigured']);
+  need('GET /money', money.body, ['ok', 'mode', 'balances']);
   need('  .balances', money.body?.balances, ['zu']);
 
   const ladder = await call('GET', `/farm/${farmId}/ladder`, null, T);
@@ -144,8 +144,8 @@ function need(label, obj, fields) {
 
   // ── the customer face, exactly as the app reads it ─────────────────────────
   const shop = await call('GET', `/shop/${slug}`);
-  need('GET /shop/:slug (no auth)', shop.body, ['ok', 'farm', 'availability', 'records', 'moneyMode']);
-  need('  .farm', shop.body?.farm, ['name', 'area', 'terms', 'slots', 'photo']);
+  need('GET /shop/:slug (no auth)', shop.body, ['ok', 'farm', 'availability', 'records']);
+  need('  .farm', shop.body?.farm, ['name', 'area', 'terms', 'slots', 'photo', 'payTo']);
   // C6 (the GLM audit, 2026-10-10): the trust fields LEFT the contract BY DESIGN —
   // the derived signals are not built, so the API stopped sending fabricated
   // defaults (a zero-record farm shipped a perfect adherence score). The buyer
@@ -179,10 +179,11 @@ function need(label, obj, fields) {
     need('  .order', ord.body?.order, ['_id', 'ref', 'total', 'lines', 'stage', 'how', 'slot', 'payment']);
   }
 
-  // The money toggle, as the app posts it.
-  const mode = await call('GET', `/farm/${farmId}/money`, null, T);
-  const same = await call('POST', `/farm/${farmId}/money/mode`, { mode: mode.body.mode }, T);
-  need('POST /money/mode', same.body, ['ok']);
+  // The ZU door, exactly as the app reads it. (The old money-mode toggle is
+  // DELETED with the rail — there is no mode to switch to any more.)
+  const zuState = await call('GET', `/farm/${farmId}/zu`, null, T);
+  need('GET /zu', zuState.body, ['ok', 'balance', 'perUsd', 'packs', 'rungPrices', 'open', 'collection', 'claims']);
+  need('  .packs[0]', zuState.body?.packs?.[0], ['id', 'name', 'zu', 'usd']);
 
   console.log(`\n${fail ? `UI CONTRACT FAILED — ${fail} field(s) the app reads but the API does not send.` : 'UI CONTRACT OK — every field the app reads is present.'}\n`);
   process.exit(fail ? 1 : 0);

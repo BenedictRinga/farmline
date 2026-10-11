@@ -224,6 +224,53 @@ function readiness(facts = {}) {
   };
 }
 
+/**
+ * EFFECTIVE RUNG — the rung the farm ACTUALLY stands on, resolved at READ time.
+ *
+ * Why this exists (two reasons, both about honesty):
+ *
+ * 1. A paid rung is a 30-DAY PERIOD, not a permanent unlock. It was recorded
+ *    (`rungPaidUntil`) and never enforced, so a farm that bought VERDICT once kept
+ *    it forever — farmline was running a one-time charge it did not notice.
+ *    Resolving on read makes the lapse SELF-HEALING: no cron, no job, and it cannot
+ *    drift away from the stored date. It also honours the standing rule — a rung
+ *    PAUSES, it is never silently re-billed.
+ *
+ * 2. The PROVISIONAL rung (the mid-season door) must expire, and must never read as
+ *    earned. It is returned with `provisional: true` so the farmer's own UI labels
+ *    it and a buyer-facing surface can refuse it.
+ *
+ * Rungs 0-2 are free forever — nothing here can take them away.
+ */
+const FREE_CEILING = 2;
+
+function effectiveRung(farm, now = Date.now()) {
+  const stored = Math.max(0, Number(farm && farm.rung) || 0);
+  if (stored <= FREE_CEILING) {
+    return { rung: stored, stored, paid: false, provisional: false, expired: false, paused: false };
+  }
+  // THE DEMO IS EXEMPT, by construction. The demo farm is the visitor's walk: it
+  // carries a high rung so a stranger can see the whole ladder, and it has no money
+  // and no paid period — so the paid-period rule would silently downgrade it to 2
+  // and break the one surface that shows the product. Money rules never touch it.
+  if (farm && farm.isDemo) {
+    return { rung: stored, stored, paid: false, provisional: false, expired: false, paused: false, demo: true };
+  }
+  // The retention rule outranks the paid period: a farm that has stopped recording
+  // for 60 days is PAUSED, not billed. (Retention buys more than the extra month.)
+  if (staleness(farm, now).action === 'pause_and_downgrade') {
+    return { rung: FREE_CEILING, stored, paid: false, provisional: false, expired: true, paused: true };
+  }
+  const paidUntil = farm && farm.rungPaidUntil ? new Date(farm.rungPaidUntil).getTime() : 0;
+  const provUntil = farm && farm.rungProvisionalUntil ? new Date(farm.rungProvisionalUntil).getTime() : 0;
+  const paid = paidUntil > now;
+  const prov = provUntil > now;
+  if (!paid && !prov) {
+    return { rung: FREE_CEILING, stored, paid: false, provisional: false, expired: true, paused: false };
+  }
+  return { rung: stored, stored, paid, provisional: !paid && prov, expired: false, paused: false };
+}
+
 function buildReason({ recommended, logs30d, daysOfHistory, sellables, confidence, orderCount }) {
   if (recommended <= 0) return { en: 'Start with your farm — plots, animals, crops. That is the whole first rung.', sw: 'Anza na shamba lako — plots, wanyama, mazao. Hiyo ni hatua ya kwanza yote.' };
   const bits = [`${daysOfHistory} days of records`, `${sellables} things you sell`, `confidence ${confidence.toUpperCase()}`];
@@ -270,4 +317,5 @@ function landing(rungId, lang = 'en') {
 
 module.exports = {
   RUNGS, FOUNDATION, COMMERCIAL, byId, readiness, staleness, landing,
+  FREE_CEILING, effectiveRung,
 };

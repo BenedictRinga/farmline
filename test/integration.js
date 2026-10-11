@@ -37,7 +37,7 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   assert(hr?.ok === true, 'server is up');
   // A4: authArmed left the public /health on purpose (a server must not advertise
   // its disarmament); the arm state is asserted module-side instead.
-  console.log(`  info  db=${hr?.db} dbName=${hr?.dbName} money=${hr?.moneyMode}`);
+  console.log(`  info  db=${hr?.db} dbName=${hr?.dbName} zuDoorOpen=${hr?.zuOpen}`);
   assert(hr?.dbName === 'farmline', 'connected to the farmline database (never zyppar/rolodex)');
   assert(require('../src/auth').authArmed === true, 'the write gate is ARMED (AUTH_SECRET set)');
 
@@ -382,16 +382,17 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   console.log('\n=== 9. customer auth + order ===');
   const cust = await req('POST', '/auth/customer', { body: { phone: '0722' + Math.floor(100000 + Math.random() * 899999), name: 'Wanjiru', slug } });
   assert(cust.status === 200 && cust.body?.token, 'customer signed in');
-  assert(cust.body?.zu?.granted === 500, `new buyer granted ${cust.body?.zu?.granted} ZU (virtual mode needs a balance to spend)`);
+  assert(cust.body?.zu?.granted === 0, `NO ZU is minted to a buyer (granted ${cust.body?.zu?.granted}) — Farmline sells ZU to FARMERS for the paid rungs, never to buyers`);
   const cTok = cust.body.token;
 
   const order = await req('POST', `/shop/${slug}/order`, {
     token: cTok,
-    body: { lines: [{ product: 'eggs', qty: 2 }], how: 'pickup', slot: 'Kesho 7:00 – 9:00 asubuhi', pay: true },
+    body: { lines: [{ product: 'eggs', qty: 2 }], how: 'pickup', slot: 'Kesho 7:00 – 9:00 asubuhi' },
   });
   assert(order.status === 201, 'order placed');
   assert(order.body?.order?.subtotal === 900, `prices come from the FARM (2 × 450 = ${order.body?.order?.subtotal})`);
-  assert(order.body?.payment?.status === 'paid', `paid in ZU: ${order.body?.payment?.ref} (${order.body?.payment?.zu} ZU)`);
+  assert(order.body?.payment === null, 'NO payment object — Farmline does not assert whether a buyer paid a farmer');
+  assert(order.body?.order?.payment?.mode === 'direct', `the order carries the FARMER's own claim shape (mode ${order.body?.order?.payment?.mode})`);
 
   console.log('\n=== 10. the customer CANNOT order a suppressed item ===');
   const badOrder = await req('POST', `/shop/${slug}/order`, { token: cTok, body: { lines: [{ product: 'milk', qty: 1 }] } });
@@ -424,31 +425,42 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   assert(lad.body.recommended <= 2, 'a 1-day-old farm is NOT pushed to a paid rung (no premature sell)');
 
   console.log('\n=== 14. accepting a rung is explicit, and gated ===');
-  // THE PAID WALL FIRST (the founder's ruling, 2026-10-08 "v-A"): a paid rung
-  // is refused with 403 whatever the readiness — force or not. The readiness
-  // gate itself is proven on a FREE rung ('sharpen' — the fresh farm's history
-  // is 0 days, the 21-day gap is live).
+  // THE PAID RUNGS ARE BOUGHT WITH ZU (the money doctrine, 2026-10-11: "no local
+  // currency to Farmline direct — just ZU for paid rungs"). This farm holds ZERO
+  // ZU, so the honest answer is 402 with the shortfall and the pack that covers
+  // it. `force` bypasses READINESS, never the PRICE — that is the property that
+  // matters, and it is asserted below. The old flat 403 ("nothing to activate
+  // yet") retired with the rail.
   const paid = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict' } });
-  assert(paid.status === 403, `a PAID rung is refused while the paid rounds are unbuilt (${paid.status})`);
+  assert(paid.status === 409 || paid.status === 402,
+    `a PAID rung cannot be opened by tapping — it meets the readiness gate or the price gate, never a 200 (${paid.status})`);
   const forced = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict', force: true } });
-  assert(forced.status === 403, `force cannot bypass the paid wall (${forced.status})`);
+  assert(forced.status === 402, `the price gate is reached past readiness and refuses honestly (${forced.status})`);
+  assert(forced.body?.needed === 240 && forced.body?.short === 240,
+    `it names the price and the shortfall (needs ${forced.body?.needed}, short ${forced.body?.short})`);
+  assert(forced.body?.suggestedPack?.zu >= forced.body?.needed,
+    `and it offers the pack that covers it (${forced.body?.suggestedPack?.id}, ${forced.body?.suggestedPack?.zu} ZU)`);
   const tooSoon = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'sharpen' } });
   assert(tooSoon.status === 409, `SHARPEN accepted too early is refused (${tooSoon.status}) with gaps listed`);
   assert(tooSoon.body?.gaps?.length > 0, 'and it says exactly what is missing');
   const okRung = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'record' } });
   assert(okRung.status === 200, 'a rung the data supports is accepted');
 
-  console.log('\n=== 15. MONEY — two modes, one shape ===');
+  console.log('\n=== 15. ZU — Farmline\'s own unit (the money doctrine) ===');
   const m = await req('GET', `/farm/${farmId}/money`, { token });
-  assert(m.status === 200, 'money state fetched');
-  console.log(`  info  mode=${m.body.mode} modes=${m.body.modes.join('|')} mpesaConfigured=${m.body.mpesaConfigured}`);
-  assert(m.body.mode === 'virtual', 'defaults to VIRTUAL (ZU) so a hobby farmer can practise');
-  assert(m.body.balances.zu > 0, `the farm holds ${m.body.balances.zu} ZU from the ZU order`);
-  const toMpesa = await req('POST', `/farm/${farmId}/money/mode`, { token, body: { mode: 'mpesa' } });
-  assert(toMpesa.status === 501, 'switching to M-Pesa without credentials is refused honestly (501), not faked');
-  console.log(`  info  "${toMpesa.body?.error}"`);
-  const badMode = await req('POST', `/farm/${farmId}/money/mode`, { token, body: { mode: 'paypal' } });
-  assert(badMode.status === 400, 'an unknown mode is rejected');
+  assert(m.status === 200, 'the ZU state is fetched');
+  console.log(`  info  mode=${m.body.mode} zu=${m.body.balances.zu} doorOpen=${m.body.open} packs=${(m.body.packs || []).length}`);
+  assert(m.body.mode === 'zu', 'the money route answers in ZU — there is no other mode');
+  assert(typeof m.body.balances.zu === 'number', `the farm holds ${m.body.balances.zu} ZU (a buyer order moved none of it)`);
+  assert(m.body.balances.kes === undefined, 'no second currency exists beside ZU');
+  assert(m.body.mpesaConfigured === undefined, 'no M-Pesa configuration is reported any more');
+  assert((m.body.packs || []).length === 4, 'the four ZU packs are published');
+  assert(JSON.stringify(m.body).includes('verdict'), 'the paid rungs are priced in ZU');
+  // THE RAIL MUST NOT COME BACK: the two-mode toggle is deleted, not hidden.
+  const toRail = await req('POST', `/farm/${farmId}/money/mode`, { token, body: { mode: 'mpesa' } });
+  assert(toRail.status === 404, `the money-mode toggle is DELETED (${toRail.status}) — there is no rail to switch to`);
+  const callbacks = await req('POST', '/mpesa/callback', { body: {} });
+  assert(callbacks.status === 404, `the M-Pesa callback is DELETED (${callbacks.status}) — A1/N1/N2 cannot be reached`);
 
   console.log('\n=== 16. this process is the API ONLY (the app is farmline-app) ===');
   // The contract INVERTED at build 9. This server used to serve the frontend; now it
@@ -592,12 +604,22 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
       'the animal\'s details are correctable (a mistyped name/weight is no longer permanent)');
   }
 
-  console.log('\n=== 12. THE PAID WALL HOLDS (v-A) ===');
+  console.log('\n=== 12. THE PAID RUNGS COST ZU (the money doctrine) ===');
   {
-    const refused = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict' } });
-    assert(refused.status === 403, `a PAID rung is refused while the paid rounds are unbuilt (${refused.status})`);
-    const forced = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict', force: true } });
-    assert(forced.status === 403, `force cannot bypass the paid wall (${forced.status})`);
+    // The farm holds ZU by now? Only if the operator confirmed a claim — which no
+    // test can do without the door open. Either way the PAID rung must never open
+    // for free: with no balance it refuses 402 and says exactly how short it is.
+    const refused = await req('POST', `/farm/${farmId}/ladder/accept`, { token, body: { rung: 'verdict', force: true } });
+    assert(refused.status === 402 || refused.status === 200,
+      `a PAID rung is bought, never granted (${refused.status})`);
+    if (refused.status === 402) {
+      assert(refused.body?.short > 0, `it names the shortfall (${refused.body?.short} ZU short of ${refused.body?.needed})`);
+      const moneyNow = await req('GET', `/farm/${farmId}/money`, { token });
+      assert(refused.body?.have === moneyNow.body?.balances?.zu,
+        `and the shortfall is measured against the REAL derived balance (${refused.body?.have})`);
+    } else {
+      assert(refused.body?.zu === 240, `the rung was paid for out of ZU (${refused.body?.zu} ZU charged)`);
+    }
   }
 
   console.log('\n=== 13. THE LYING DOOR IS GONE (iii-A) ===');
@@ -606,19 +628,19 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(enq.status === 404, `the enquire route that pretended to receive no longer exists (${enq.status})`);
   }
 
-  console.log('\n=== 14. A FARMER TOKEN CANNOT PAY (the Infinity-ZU hole) ===');
+  console.log('\n=== 14. NO RAIL — Farmline never moves money between a buyer and a farmer ===');
   {
     const money0 = await req('GET', `/farm/${farmId}/money`, { token });
     const zu0 = money0.body?.balances?.zu;
     const fOrder = await req('POST', `/shop/${slug}/order`, {
       token, body: { lines: [{ product: 'eggs', qty: 1 }], pay: true },
     });
-    assert(fOrder.status === 201, `a farmer can still place the order — the work is the point (${fOrder.status})`);
-    assert(fOrder.body?.payment && fOrder.body.payment.status !== 'paid',
-      `the payment did NOT go through (status: ${fOrder.body?.payment?.status})`);
+    assert(fOrder.status === 201, `the order is placed — the work is the point (${fOrder.status})`);
+    assert(fOrder.body?.payment === null, 'NO payment was attempted: there is no rail left to attempt one on');
+    assert(typeof fOrder.body?.payTo === 'string', "the buyer is handed the FARMER's own payTo instruction instead");
     const money1 = await req('GET', `/farm/${farmId}/money`, { token });
     assert(money1.body?.balances?.zu === zu0,
-      `no ZU was minted out of thin air (balance ${zu0} -> ${money1.body?.balances?.zu})`);
+      `no ZU moved for a farmer↔buyer settlement (balance ${zu0} -> ${money1.body?.balances?.zu})`);
   }
 
   console.log('\n=== 15. THE CAPTURE RECORDS A REAL NUMBER (ii-C contract) ===');
@@ -788,7 +810,10 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
           ['POST', `/farm/${dfarmId}/sellables`],
           ['POST', `/farm/${dfarmId}/reverse-all`],
           ['POST', `/farm/${dfarmId}/restore-all`],
-          ['POST', `/farm/${dfarmId}/money/mode`],
+          // `/money/mode` is GONE (the rail is deleted): it 404s now, not 403, so
+          // it is no longer a demo-guard case. `/zu/claim` IS one — filing a claim
+          // writes, so the demo refuses it like every other write on the farm.
+          ['POST', `/farm/${dfarmId}/zu/claim`],
           ['POST', `/farm/${dfarmId}/ladder/accept`],
           ['PATCH', `/farm/${dfarmId}/profile`],
           ['PATCH', `/farm/${dfarmId}/crops/x`],
