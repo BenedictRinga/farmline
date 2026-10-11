@@ -2346,7 +2346,12 @@ api.post('/farm/:farmId/zu/claim', auth.requireAuth('farmer'), auth.requireFarmS
 
 // ── THE OPERATOR'S DOOR (admin key). Confirming is the ONLY thing that credits.
 api.get('/zu/claims', wrap(async (req, res) => {
-  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || req.query?.key || ''));
+  // HEADER ONLY, and that is a security decision, not a style one (the N1 class, the
+  // audit's 2026-10-10 finding): a key in a QUERY STRING lands in nginx's access log
+  // verbatim. The M-Pesa callback that made N1 famous is deleted, so this was the last
+  // URL that could carry a farmline secret — and now it cannot. A caller arriving with
+  // ?key=… is told to use the header rather than silently accepted.
+  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || ''));
   if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
   const wanted = String(req.query?.status || 'claimed');
   const status = ['claimed', 'confirmed', 'rejected'].includes(wanted) ? wanted : 'claimed';
