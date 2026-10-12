@@ -276,6 +276,22 @@ const healthPayload = () => ({
 const healthPayloadAsync = async () => {
   const base = healthPayload();
   try { base.visionCallsToday = await metacounter.count('vision-demo'); } catch { /* absent, not wrong */ }
+  // ── THE OPERATOR'S QUEUE (2026-10-13, Task 11.1) ─────────────────────────────
+  // The claim -> confirm door needs a HUMAN, and nothing pushed it: a farmer could
+  // pay, file a claim, and wait in silence while CommandCenter showed a number nobody
+  // was watching. The prober already polls this payload every 120s and already owns
+  // the sound + haptic alarm path, so the queue rides it for free — and `oldest` is
+  // the honest part: a claim waiting four hours is a different fact from one filed a
+  // minute ago, and the alarm should say which.
+  try {
+    base.claimsWaiting = await ZuClaim.countDocuments({ status: 'claimed' });
+    const oldest = base.claimsWaiting
+      ? await ZuClaim.findOne({ status: 'claimed' }).sort({ createdAt: 1 }).select('createdAt').lean()
+      : null;
+    base.oldestClaimHours = oldest?.createdAt
+      ? Math.round((Date.now() - new Date(oldest.createdAt).getTime()) / 3600000)
+      : null;
+  } catch { /* absent, not wrong — the watch is never blocked by the DB */ }
   // C7: the day's 5xx count — the watch alarms on error SPIKES, not just spend.
   base.errors5xxToday = errStats.day === new Date().toISOString().slice(0, 10) ? errStats.n : 0;
   base.bootedAt = errStats.bootedAt;

@@ -934,6 +934,14 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     const hr2 = await fetch(ROOT + '/health').then((r) => r.json()).catch(() => null);
     assert(hr2 && typeof hr2.visionCallsToday === 'number',
       'the health answer carries visionCallsToday (the monitor reads it for free)');
+    // THE OPERATOR'S QUEUE (Task 11.1, 2026-10-13): the zyppar prober reads these two
+    // off the SAME health answer and fires the founder's sound+haptic alarm when a ZU
+    // claim is waiting. A silent field removal would kill that alarm with every gate
+    // still green — which is exactly why this assertion exists.
+    assert(hr2 && typeof hr2.claimsWaiting === 'number',
+      `the health answer carries claimsWaiting (${hr2?.claimsWaiting}) — the claim alarm rides it`);
+    assert(hr2 && (hr2.oldestClaimHours === null || typeof hr2.oldestClaimHours === 'number'),
+      `and the age of the longest wait (${hr2?.oldestClaimHours})`);
   }
 
   // ════════════════════════════════════════════════════════════════════════════
