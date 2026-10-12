@@ -290,6 +290,10 @@ contact path third. Rides the buyer section that already exists.
   every closed item re-verified on the founder's phone · AGENTS.md §2 ends
   the round with **"Not built in the free layers: NONE."**
 
+### THE NATIVE-PASS GATE (the founder’s verdict, 2026-10-13 — STANDING)
+- The five-corrections session is verified: “the report is faithful and the build is real.” The stories land the ethos; the modal treats the visitor with Zyppar’s full respect; the chip no longer slips; the Amharic headline strings read as real Amharic (the founder’s own read-back).
+- **THE ONE OPEN DEBT:** the Amharic and Hausa long-form copy still needs the NATIVE PASS — and it **MUST precede any Hausa/Amharic distribution push**. No ha/am marketing, sharing campaign, or store listing goes out before the native review signs the long-form copy. The flag rides every future session report until the pass is done.
+
 ### ROUND B — Capacitor init (app)
 The farmer's phone: wrap the app for Android so the photo capture is native
 and the install is one link.
