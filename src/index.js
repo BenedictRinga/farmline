@@ -342,6 +342,22 @@ api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
 //    signal), 'register' (the conversion), 'login' (the return). The static
 //    shell is served by nginx and never reaches this process; the zyppar's
 //    monitor parses that log separately and reads this collection.
+/**
+ * THE CHANNEL TAG — the one field that answers "which channel works" (2026-10-12).
+ *
+ * It is WHITELISTED, and the friction is deliberate: the tag is a dimension of the
+ * founder's own funnel, so an open string would let anyone write `src=whatever` and
+ * corrupt the channel mix from outside. Adding a channel is one line here, on purpose.
+ *
+ * Read from the BODY, so every door can carry it — the app knows how it was launched
+ * and sends the same tag on the beacon, the register, the demo and the customer mint.
+ */
+const VISIT_SRC = ['app', 'shop', 'settings', 'demo', 'guide', 'buyer', 'status'];
+function cleanSrc(v) {
+  const s = String(v || '').trim().toLowerCase().slice(0, 20);
+  return VISIT_SRC.includes(s) ? s : '';
+}
+
 function fl_recordVisit(req, kind) {
   try {
     const c = conn.db.collection('visits');
@@ -350,6 +366,8 @@ function fl_recordVisit(req, kind) {
       ip: String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().slice(0, 64),
       ua: String(req.headers['user-agent'] || '').slice(0, 180),
       ref: String(req.headers.referer || '').slice(0, 240),
+      // '' when untagged — an absent tag is honest, a guessed one is not.
+      src: cleanSrc(req.body?.src),
     }).catch(() => { /* the ledger never blocks an auth flow */ });
   } catch { /* never blocks */ }
 }

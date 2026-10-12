@@ -453,6 +453,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     regAfter === regBefore
       ? ok('a FORGED kind writes no register row — the beacon hard-codes its own kind')
       : bad('A FORGED KIND WROTE A REGISTER ROW — the funnel can be edited from outside');
+
+    // THE CHANNEL TAG (2026-10-12) is a dimension of the same funnel, so it is
+    // WHITELISTED: a known tag lands on the row, an unknown one is dropped rather than
+    // stored. Otherwise anyone could write src=whatever and poison the channel mix.
+    await call('POST', '/visit', { src: 'shop' });
+    await sleep(300);
+    const tagged = await visits.findOne({ kind: 'shell', src: 'shop' });
+    tagged
+      ? ok('a WHITELISTED channel tag (shop) lands on the visit row')
+      : bad('a whitelisted channel tag was DROPPED — no channel could ever be attributed');
+
+    await call('POST', '/visit', { src: 'not-a-channel' });
+    await sleep(300);
+    const junk = await visits.countDocuments({ src: 'not-a-channel' });
+    junk === 0
+      ? ok('an UNKNOWN channel tag is dropped, never stored in the funnel')
+      : bad('A JUNK CHANNEL TAG WAS STORED — the channel mix can be poisoned from outside');
   }
 
   console.log(`\n${fail ? `CHAT+MONEY FAILED — ${fail} problem(s).` : 'CHAT+MONEY PASSED — both doors work, and the rail is honest.'}\n`);
