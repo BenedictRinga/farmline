@@ -417,6 +417,39 @@ function shellBeaconRateLimit(req, res, next) {
   return next();
 }
 
+// ── THE NATIVE-SPEAKER CONTRIBUTION (2026-10-13, cloned from LoopKeeper) ────────
+// The correction path's other half. A speaker offers a better rendering of one of our
+// strings; it is stored as a SUGGESTION and NEVER applied automatically (see below).
+api.post('/translations/contribute', shellBeaconRateLimit, wrap(async (req, res) => {
+  const lang = String(req.body?.lang || '').toLowerCase();
+  if (!['en', 'sw', 'fr', 'ha', 'am'].includes(lang)) return bad(res, 400, 'unknown language');
+  const keys = req.body?.keys && typeof req.body.keys === 'object' ? req.body.keys : {};
+  const rows = Object.keys(keys).slice(0, 50).map((k) => ({
+    at: new Date(),
+    lang,
+    key: String(k).slice(0, 120),
+    value: String(keys[k] == null ? '' : keys[k]).slice(0, 400),
+    ip: String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().slice(0, 64),
+  })).filter((r) => r.key && r.value);
+  if (!rows.length) return bad(res, 400, 'nothing to contribute');
+  try {
+    await conn.db.collection('translationsuggestions').insertMany(rows);
+  } catch { return bad(res, 500, 'could not store the suggestion'); }
+  // The answer says what actually happened: the device applied it, WE stored it for review.
+  return ok(res, { accepted: rows.length, applied: 'local-only', note: 'stored for review; never applied automatically' });
+}));
+
+// THE REVIEW QUEUE — admin key in the HEADER only (the N1 class: a key in a query string
+// lands in the access log verbatim).
+api.get('/translations/suggestions', wrap(async (req, res) => {
+  const gate = config.checkAdminKey(String(req.headers['x-admin-key'] || ''));
+  if (!gate.ok) return res.status(gate.status).json({ ok: false, error: gate.error });
+  const lang = String(req.query?.lang || '').toLowerCase();
+  const q = lang ? { lang } : {};
+  const rows = await conn.db.collection('translationsuggestions').find(q).sort({ at: -1 }).limit(200).toArray();
+  return ok(res, { suggestions: rows });
+}));
+
 api.post('/visit', shellBeaconRateLimit, wrap(async (req, res) => {
   // ONE KIND, hard-coded on purpose: this door answers one question — did a shell
   // load? — and a caller-supplied `kind` would let anyone write rows that look like

@@ -942,6 +942,20 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
       `the health answer carries claimsWaiting (${hr2?.claimsWaiting}) — the claim alarm rides it`);
     assert(hr2 && (hr2.oldestClaimHours === null || typeof hr2.oldestClaimHours === 'number'),
       `and the age of the longest wait (${hr2?.oldestClaimHours})`);
+
+    // ── THE NATIVE-SPEAKER CONTRIBUTION DOOR (2026-10-13) ───────────────────────
+    // Public and anonymous on purpose (a farmer's cousin should not need an account to
+    // fix a bad sentence) — which is exactly why it needs a valve and a test.
+    const badLang = await req('POST', '/translations/contribute', { body: { lang: 'xx', keys: { 'shop.title': 'X' } } });
+    assert(badLang.status === 400, `an unknown language is refused (${badLang.status})`);
+    const emptyBody = await req('POST', '/translations/contribute', { body: { lang: 'sw', keys: {} } });
+    assert(emptyBody.status === 400, `an empty contribution is refused (${emptyBody.status})`);
+    const good = await req('POST', '/translations/contribute', { body: { lang: 'sw', keys: { 'shop.title': 'Duka' } } });
+    assert(good.status === 200 && good.body?.accepted === 1, `a real correction is accepted (${good.status}, accepted=${good.body?.accepted})`);
+    assert(good.body?.applied === 'local-only',
+      'and the answer says LOCAL ONLY — a suggestion is never applied to everyone silently');
+    const wrongKey = await fetch(`${ROOT}/api/farmline/translations/suggestions`, { headers: { 'x-admin-key': 'definitely-not-the-key' } });
+    assert(wrongKey.status === 401 || wrongKey.status === 403, `the review queue refuses a WRONG key (${wrongKey.status})`);
   }
 
   // ════════════════════════════════════════════════════════════════════════════
