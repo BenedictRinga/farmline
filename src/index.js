@@ -1958,24 +1958,76 @@ api.get('/meta/prices', wrap(async (req, res) => {
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
-// C2 (the server face): THE PER-FARM OG DATA — the one JSON a per-farm share
-// card needs, public, keyed by the shop slug. The card itself needs an nginx
-// rewrite to feed crawler UAs this JSON (the requested diff is in the thread
-// report); until that lands, the app shares the honest static card and this
-// route carries the truth for the day the plumbing arrives.
+// C2 (the server face): THE PER-FARM OG CARD — the JSON for machines, and (2026-10-13)
+// THE HTML CARD the crawlers actually read. WhatsApp and Telegram build a preview
+// from OG META TAGS IN HTML; a JSON body is a convenience, and "some crawlers accept
+// it" is no foundation for a share. The bot rewrite feeds ?format=html to this route.
 // ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * HTML-escape EVERY interpolated value. The farm name and story are FARMER-AUTHORED,
+ * and this route serves them as OUR OWN HTML on OUR OWN origin — an unescaped story
+ * would be a stored XSS with the app's session in reach. The audit found zero XSS
+ * sinks in farmline; this exists so it stays zero.
+ */
+const escHtml = (v) => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 api.get('/og/s/:slug', wrap(async (req, res) => {
   const farm = await Farm.findOne({ slug: String(req.params.slug || '').toLowerCase() }).lean();
   if (!farm) return bad(res, 404, 'no such farm');
   const shelf = await projection.buildAvailability(String(farm._id));
+  const products = (Array.isArray(shelf) ? shelf : []).filter((i) => i.qty > 0).length;
+  const url = `${config.publicUrl}${config.basePath}/s/${farm.slug}`;
+  const title = `${farm.name} — fresh from the farm`;
+  const description = farm.story || 'Order straight from a real smallholder farm.';
+
+  // THE HTML CARD (`?format=html`, and what the bot rewrite feeds). Real og: tags in a
+  // real document, plus a human escape hatch: anyone who lands here is sent to the shop
+  // itself. noindex — this URL exists to feed previews, and its canonical is the shop
+  // page, so it must never compete with it in a search result.
+  if (String(req.query.format || '').toLowerCase() === 'html') {
+    // An OG image MUST be absolute; a data: URL or a bare relative path is useless to a
+    // crawler, so a photo we cannot absolutise is omitted rather than emitted broken.
+    let image = String(farm.photo || '');
+    if (image && !/^https?:\/\//i.test(image)) {
+      image = image.startsWith('/') ? `${config.publicUrl}${image}` : `${config.publicUrl}/${image}`;
+    }
+    if (/^data:/i.test(image)) image = '';
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>${escHtml(title)}</title>
+<meta name="description" content="${escHtml(description)}" />
+<link rel="canonical" href="${escHtml(url)}" />
+<meta name="robots" content="noindex, follow" />
+<meta property="og:site_name" content="farmline" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="${escHtml(title)}" />
+<meta property="og:description" content="${escHtml(description)}" />
+<meta property="og:url" content="${escHtml(url)}" />
+${image ? `<meta property="og:image" content="${escHtml(image)}" />` : ''}
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${escHtml(title)}" />
+<meta name="twitter:description" content="${escHtml(description)}" />
+${image ? `<meta name="twitter:image" content="${escHtml(image)}" />` : ''}
+<meta http-equiv="refresh" content="0; url=${escHtml(url)}" />
+</head>
+<body>
+<p><a href="${escHtml(url)}">${escHtml(title)}</a></p>
+<p>${escHtml(description)}</p>
+<p>${products} item(s) on the shelf right now.</p>
+</body>
+</html>`;
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=300');
+    return res.status(200).send(html);
+  }
+
   return ok(res, {
-    og: {
-      title: `${farm.name} — fresh from the farm`,
-      description: farm.story || 'Order straight from a real smallholder farm.',
-      image: farm.photo || '',
-      url: `${config.publicUrl}${config.basePath}/s/${farm.slug}`,
-      products: (Array.isArray(shelf) ? shelf : []).filter((i) => i.qty > 0).length,
-    },
+    og: { title, description, image: farm.photo || '', url, products },
   });
 }));
 

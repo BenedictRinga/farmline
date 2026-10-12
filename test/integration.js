@@ -1034,6 +1034,34 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(og.status === 200 && og.body?.og?.url?.includes(`/farmline/s/${slug}`), `the per-farm OG carries the shop URL (${og.status})`);
     const ogMiss = await req('GET', '/og/s/no-such-slug');
     assert(ogMiss.status === 404, 'an unknown slug is a 404');
+
+    // ── THE HTML CARD (2026-10-13, Task 12.1) ──────────────────────────────────
+    // WhatsApp and Telegram build a preview from og: META TAGS IN HTML; the JSON above
+    // is a convenience for machines. This is the durable shape the bot rewrite feeds.
+    const htmlRes = await fetch(`${ROOT}/api/farmline/og/s/${slug}?format=html`);
+    const cardHtml = await htmlRes.text();
+    assert(htmlRes.status === 200 && String(htmlRes.headers.get('content-type') || '').includes('text/html'),
+      `the OG HTML card answers as HTML (${htmlRes.status}, ${String(htmlRes.headers.get('content-type') || '').slice(0, 32)})`);
+    assert(cardHtml.includes('property="og:title"') && cardHtml.includes('property="og:url"') && cardHtml.includes('name="twitter:card"'),
+      'the card carries the og: title and url and the twitter card');
+    assert(cardHtml.includes(`/farmline/s/${slug}`), 'and its canonical points at the real shop page');
+    assert(cardHtml.includes('name="robots" content="noindex'),
+      'the card is NOINDEX — it feeds previews and must not compete with the shop page it describes');
+
+    // THE ESCAPING — the reason this route needed care. The farm name and story are
+    // FARMER-AUTHORED and this route serves them as OUR OWN HTML on OUR OWN origin, so
+    // an unescaped name would be a stored XSS with the app's session in reach. The audit
+    // found zero XSS sinks in farmline; this assertion is what keeps the new one honest.
+    const origName = String(og.body?.og?.title || '').split(' \u2014 ')[0] || 'Farm';
+    const probeName = 'probe <b>bold</b> & "quoted"';
+    const renamed = await req('PATCH', `/farm/${farmId}/profile`, { token, body: { name: probeName } });
+    assert(renamed.status === 200, `the farm can be renamed for the escaping probe (${renamed.status})`);
+    const escHtml = await (await fetch(`${ROOT}/api/farmline/og/s/${slug}?format=html`)).text();
+    assert(!escHtml.includes('<b>bold</b>') && escHtml.includes('&lt;b&gt;bold&lt;/b&gt;'),
+      'a farm name carrying markup arrives as TEXT in the HTML card (no stored XSS via the share route)');
+    assert(!escHtml.includes('"quoted"') || escHtml.includes('&quot;quoted&quot;'),
+      'and a double quote cannot break out of an attribute');
+    await req('PATCH', `/farm/${farmId}/profile`, { token, body: { name: origName } });
     // C6: the fabricated trust is GONE from the public read
     const pub = await req('GET', `/shop/${slug}`);
     assert(pub.status === 200 && !('trust' in (pub.body?.farm || {})), `publicFarm no longer carries the fabricated trust (${Object.keys(pub.body?.farm || {}).join(',')})`);
