@@ -61,6 +61,15 @@ const RUNGS = [
       en: ['Ask farmline anything about your own records — in plain words', 'A monthly note from farmline: what your farm is telling you'],
     },
     commitment: { sw: 'Sekunde 20 kwa siku', en: '20 seconds a day' },
+    // THE ONE STORY (the founder's correction 4, 2026-10-13): the free rungs
+    // are ONE continuous walk — knowing the farm, keeping the work, sharpening
+    // the honest numbers of a craft mastered — told to a first-time visitor
+    // BEFORE any verdict exists. The expansion carries it; technology is a
+    // servant inside the story ("say it or type it"), never a banner.
+    story: {
+      sw: 'Huanza na kujua unacho kirwa. Wanyama wako kwa majina yao, plots zako kwa udongo wao, mazao yako kwa siku walizopandwa — yote mahali pamoja, mfukoni mwako. Farmline inafanya hilo kuwa mtangulizi wa kila asubuhi: inajua wanahitaji nini leo, na shamba linakuambia kabla hujashtuka. Hufanyi kitu cha ajabu. Unajua shamba lako tu — kabisa.',
+      en: 'It starts with knowing what you have. Your animals by name, your plots by their soil, your crops by the day they went in — all of it in one place, in your pocket. Farmline turns that knowing into a quiet morning companion: it knows what needs doing today, and the farm tells you before you have to wonder. You do nothing clever. You just know your farm — completely.',
+    },
   },
   {
     rung: 1, id: 'record', free: true, priceKES: 0,
@@ -81,6 +90,11 @@ const RUNGS = [
       en: ['Your records, spoken back to you — voice notes become entries', 'The farm\'s numbers explained, never just shown'],
     },
     commitment: { sw: 'Dakika 10 kwa wiki inatosha', en: '10 minutes a week is enough' },
+    // THE ONE STORY, continued: keeping the work — the teacher's discipline.
+    story: {
+      sw: 'Kisha inakuja kuhifadhi kazi — nidhamu ya mwalimu. Kila lita iliyochorwa, kila kibaba lililokusanywa, kila dawa iliyochanganywa, kila mnyama aliyeotibiwa: sema au andika, na linakumbukwa kwa maneno rahisi. Hakuna kinachopotea, hakuna kinakadiriwa, na msimu unaacha kuwa giza tunu. Huu ni kumbukumbu inayowezesha hatua zote zilizo mbeleni — na ni yako, inahifadhiwa kwa ukamilifu.',
+      en: 'Then comes keeping the work — the teacher\u2019s discipline. Every litre drawn, every egg collected, every spray mixed, every animal treated: say it or type it, and it is remembered in plain words. Nothing slips, nothing is guessed, and the season stops being a blur. This is the record that makes every later step possible — and it is yours, kept whole.',
+    },
   },
   {
     rung: 2, id: 'sharpen', free: true, priceKES: 0,
@@ -101,6 +115,11 @@ const RUNGS = [
       en: ['The acre question answered by your own data', 'What worked and what didn\'t — read from your records, not guessed'],
     },
     commitment: { sw: 'Dakika 15 kwa wiki', en: '15 minutes a week' },
+    // THE ONE STORY, completed: the maestro's refinement — farming as craft.
+    story: {
+      sw: 'Pindi kumbukumbu zikikamilika, namba zako mwenyewe zinaanza kukufundisha. Kinachozalisha, kinachotupa, kinachojibu huduma — kusomwa kwa ukweli, si kwa kufurahisha. Faraja ya mtaalamu inakaa hapa: lishe sahihi siku sahihi, hakuna kilichoachwa mezani, kila msimu ukivutwa bora kuliko uliyopita. Hii ni kilimo kama ufundi — na ni bure, milele.',
+      en: 'With the records whole, your own numbers start teaching you. What yields, what drains, what answers care — read honestly, not flattered. The maestro\u2019s satisfaction sits here: the right feed on the right day, nothing left on the table, every season harnessed a little better than the last. This is farming as craft — and it is free, forever.',
+    },
   },
 
   // ── THE COMMERCIAL LADDER — 4 layers ────────────────────────────────────────
@@ -329,6 +348,10 @@ function landing(rungId, lang = 'en') {
     whatYouGet: r.gets[lang] || r.gets.en,
     whatYouGive: r.gives[lang] || r.gives.en,
     commitment: L(r.commitment),
+    // THE ONE STORY (the founder's correction 4, 2026-10-13): the free rungs'
+    // continuous walk, carried on the landing block so the app can expand
+    // rungs 0-2 like the paid ones — the onboarding story BEFORE any verdict.
+    story: (r.story && (r.story[lang] || r.story.en)) || null,
     aiLadder: (r.ai && (r.ai[lang] || r.ai.en)) || [],
     requires: r.requires || null,
   };
