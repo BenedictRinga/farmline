@@ -8,10 +8,10 @@
 // │ 1 RECORD   What actually happened?                                        │
 // │ 2 SHARPEN  What's working, what isn't?                                    │
 // ├── THE COMMERCIAL LADDER (4 layers, paid) ─────────────────────────────────┤
-// │ 3 VERDICT  Can this pay me?              KES   300/mo                     │
-// │ 4 PLAN     How do I get there?           KES   700/mo                     │
-// │ 5 OPERATE  Run it without standing in it KES 1,500/mo                     │
-// │ 6 COMMERCE Scale and finance it          KES 3,000+/mo                    │
+// │ 3 VERDICT  Can this pay me?                ZU   300/mo                    │
+// │ 4 PLAN     How do I get there?             ZU   700/mo                    │
+// │ 5 OPERATE  Run it without standing in it   ZU 1,500/mo                    │
+// │ 6 COMMERCE Scale and finance it            ZU 3,000+/mo                   │
 // └───────────────────────────────────────────────────────────────────────────┘
 //
 // Two rules this file exists to enforce:
@@ -23,6 +23,19 @@
 //  B) FARM LINE DECIDES READINESS; THE FARMER DECIDES ACCEPTANCE. Readiness is
 //     computed from the farm's own data. Nothing is ever charged silently, and a
 //     farm that stops providing data is DOWNGRADED, not billed.
+//
+// THE ETHOS (the founder, 2026-10-12 — THE SUPREME RULING, governing every line
+// below): the ladder speaks for FARMING, not for commerce — farming right,
+// happily, efficiently and successfully; farming for farming's sake. The
+// satisfaction, the joy of doing something perfectly right. The teacher's
+// reward. The maestro's fulfilment, leaving nothing on the table. Produce
+// might all be given away or self-consumed — the free tier's goal is to make
+// the farmer the BEST FARMER they can be, an ideal that exists outside
+// commerce. Commerce is one of the farm's tools (selling only when the farmer
+// wants), never the destination. The voice is the guide's own: "your work is
+// the product, money is a consequence." THE CURRENCY LAW (v2) rides inside:
+// ZU appears ONLY in user↔Farmline commerce (these paid rungs); every
+// market-facing or country-facing expression stays agnostic.
 const { term } = require('./vocab');
 
 const RUNGS = [
@@ -35,10 +48,11 @@ const RUNGS = [
       sw: ['Weka plots, wanyama na mazao', 'Rekodi kwa sekunde 20 kwa siku', 'Hakuna ruhusa inahitajika'],
       en: ['Set up plots, animals and crops', 'Log in about 20 seconds a day', 'No permissions needed at all'],
     },
-    // What the farmer GETS.
+    // What the farmer GETS — THE ETHOS VOICE (the founder's drafts, 2026-10-12):
+    // the craft of presence and mastery of the whole farm.
     gets: {
-      sw: ['Orodha ya kazi ya leo', 'Ratiba ya dawa, minyoo na kuua kupe', 'Vikumbusho vya kupanda na kuvuna'],
-      en: ["Today\'s work list", 'Spray, deworming and vaccination schedule', 'Planting and harvest reminders'],
+      sw: ['Kila kitu chako mahali pamoja — wanyama, plots na mazao', 'Leo inajua wanahitaji nini — hujishtuki unafanye nini', 'Shamba linakuambia, kila asubuhi'],
+      en: ['Everything you have, in one place — your animals, your plots, your crops', 'Today knows what they need — you never wonder what to do', 'The farm tells you, every morning'],
     },
     // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
     // the rungs — users and investors aspire, the build follows the ladder).
@@ -57,8 +71,8 @@ const RUNGS = [
       en: ['Keep logging', 'Record a sale in one sentence'],
     },
     gets: {
-      sw: ['Historia ya maziwa, mayai, mavuno', 'Muhtasari wa mwezi kwa lugha rahisi'],
-      en: ['Milk, egg and harvest history', 'A plain-language month summary'],
+      sw: ['Kazi yako inakumbukwa — maziwa, mayai, mavuno, kila dawa', 'Hakuna kinachopotea, hakuna kinakadiriwa', 'Msimu unakufundisha kwa kuona yote kwa pamoja'],
+      en: ['Your work, remembered — milk, eggs, harvests, every spray and deworming', 'Nothing slips, nothing is guessed', 'The season teaches you because you can see it whole'],
     },
     // THE AI LADDER (the founder, 2026-10-08: the Tiers 1-3 services live in
     // the rungs — users and investors aspire, the build follows the ladder).
@@ -73,8 +87,8 @@ const RUNGS = [
     name: { sw: 'BAINISHA', en: 'SHARPEN' },
     question: { sw: 'Kipi kinafaa, kipi hakifai?', en: "What's working, what isn't?" },
     gets: {
-      sw: ['Kinachobaki kwa kila lita, tray na gunia', 'Mlinganisho wa ekari: mahindi vs napier'],
-      en: ["What\'s left from each litre, tray and bag", 'The acre question: maize vs napier'],
+      sw: ['Namba zako mwenyewe hukuweka bora', 'Kinachozalisha, kinachotupa, kinachojibu huduma', 'Faraja ya kimya ya kutokuacha chochote mezani'],
+      en: ['Your own numbers make you better', 'What yields, what drains, what responds to care', 'The quiet satisfaction of leaving nothing on the table'],
     },
     gives: {
       sw: ['Rekodi gharama kwa maneno rahisi ("nilinunua mbolea 6,000")'],
@@ -95,8 +109,8 @@ const RUNGS = [
     name: { sw: 'JIBU', en: 'VERDICT' },
     question: { sw: 'Je, shamba linaweza kunilipa?', en: 'Can this pay me?' },
     gets: {
-      sw: ['Nafasi kati ya mapato unayohitaji na faida ya shamba', 'Kipimo cha muda wa fedha zako', 'Orodha ya hatua zilizopangwa kwa KES'],
-      en: ['The gap between what you need and what the farm makes', 'How many months of expenses your farm cash covers', 'Ranked actions, each with a KES figure'],
+      sw: ['Nafasi kati ya mapato unayohitaji na faida ya shamba', 'Kipimo cha muda wa fedha zako', 'Orodha ya hatua zilizopangwa, kila moja na gharama yake'],
+      en: ['The gap between what you need and what the farm makes', 'How many months of expenses your farm cash covers', 'Ranked actions, each with its own cost'],
     },
     gives: {
       sw: ['Kipato unachohitaji (mshahara + bajeti)', 'Msimu wote wa miezi 12 (pamoja na karo)', 'Kurekodi mara kwa mara', 'Dakika 15 kwa mwezi kupitia'],
