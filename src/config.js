@@ -43,7 +43,14 @@ function resolveMongoUri() {
 
   // Local dev default: the mongod already running on this machine.
   const local = envVar('MONGO_LOCAL_URI', 'mongodb://localhost:27017/farmline');
-  if (envVar('FARMLINE_USE_LOCAL_MONGO', 'true') === 'true') return local;
+  // ── THE SECOND `return local;`, KILLED (2026-10-13) ─────────────────────────────
+  // The refusal below replaced the LAST silent fallback. This one — guarded by a flag that
+  // DEFAULTED TO TRUE — sat above it and shadowed it, so any host where the flag was absent
+  // (a fresh box, a re-provisioned droplet, an env file not found from the working directory)
+  // silently returned the local mongod and never reached the refusal. Development is
+  // unaffected: with no URI it still reaches the final `return local;`, which is right for a
+  // laptop. Production can no longer take that path at all.
+  if (process.env.NODE_ENV !== 'production' && envVar('FARMLINE_USE_LOCAL_MONGO', 'false') === 'true') return local;
 
   // Droplet: derive a clean farmline db from the shared paid cluster URI.
   for (const p of ENV_CANDIDATES) {
