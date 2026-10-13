@@ -2740,9 +2740,90 @@ api.post('/shop/:slug/order', auth.requireAuth('customer', 'farmer'), wrap(async
 // ══════════════════════════════════════════════════════════════════════════════
 // ADMIN / META
 // ──────────────────────────────────────────────────────────────────────────────
-api.get('/meta/protocols', (_req, res) => ok(res, {
-  species: protocols.speciesList(),
-  counts: Object.fromEntries(protocols.speciesList().map((s) => [s, protocols.forSpecies(s).length])),
+api.get('/meta/protocols', (_req, res) => {
+  // THE MEETING (2026-10-13) reads this: the first care-calendar entries per
+  // species/crop, so the sheet's reflection and the one draft carry NOTHING
+  // invented — the words are the protocols' own. Additive: the existing
+  // `species` + `counts` consumers are untouched.
+  const catalog = {};
+  for (const s of protocols.speciesList()) {
+    catalog[s] = (protocols.forSpecies(s) || []).slice(0, 3).map((r) => String(r.en || r.name || '')).filter(Boolean);
+  }
+  return ok(res, {
+    species: protocols.speciesList(),
+    counts: Object.fromEntries(protocols.speciesList().map((s) => [s, protocols.forSpecies(s).length])),
+    catalog,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE ADVISOR — the Meeting's AI voice (the LoopKeeper pattern: local authors,
+// remote polishes; the sheet is complete without this route).
+//   · PUBLIC — the visitor's consultation is the point; a farmer token, when it
+//     rides, keys a bigger daily allowance (metacounter, day-keyed).
+//   · TWO MODES ONLY: 'arrange' (Slide 3 — ONE arrangement suggested, mapped to
+//     the catalog client-side) and 'polish' (Slide 10 — the ONE draft re-worded
+//     in place, the same facts, never a second option — the founder's rule).
+//   · lang rides every call — the reply is in the person's language, never
+//     auto-English.
+//   · It NEVER WRITES. Text in, text out.
+//   · The valve: anonymous → the IP-keyed cap (default 5/day); a verified
+//     farmer → the farm-keyed cap (default 20/day). No ZU charge — the sheet
+//     must never ask a money question (the guardrail), so the caps are the
+//     honest abundance control, and the client degrades to the local draft.
+// ══════════════════════════════════════════════════════════════════════════════
+api.post('/advisor', express.json({ limit: '64kb' }), wrap(async (req, res) => {
+  const mode = req.body?.mode === 'polish' ? 'polish' : 'arrange';
+  const lang = ['en', 'sw', 'fr', 'ha', 'am'].includes(String(req.body?.lang)) ? String(req.body.lang) : 'en';
+  // THE CAP — the valve first.
+  const payload = auth.verify(auth.bearer(req));
+  const isFarmer = payload?.typ === 'farmer';
+  const cap = isFarmer ? 20 : 5;
+  const key = isFarmer ? 'advisor-farm-' + String(payload.sub) : 'advisor-ip-' + require('crypto').createHash('sha256').update(auth.clientIp(req)).digest('hex').slice(0, 16);
+  if (await metacounter.count(key) >= cap) {
+    return bad(res, 429, 'the advisor rests for today — the draft stands as built');
+  }
+  const vitals = String(req.body?.vitals || '').slice(0, 2000);
+  const draft = String(req.body?.draft || '').slice(0, 600);
+  const advisorKey = process.env.OPENROUTER_API_KEY;
+  if (!advisorKey) return bad(res, 503, 'the advisor is not armed on this server');
+  const model = process.env.FARMLINE_ADVISOR_MODEL || 'deepseek/deepseek-chat';
+  const system = mode === 'polish'
+    ? [
+        'You rewrite ONE line describing a person\'s small farm plan for farmline, a farm app for East Africa.',
+        'RULES: keep EXACTLY the same facts (the same animals, crops and place — add nothing, remove nothing).',
+        `Write in ${lang === 'en' ? 'English' : lang}. Warm, plain, concrete; at most 2 sentences; no promises about money, safety or yield; no emojis; answer with the rewritten line ONLY.`,
+      ].join(' ')
+    : [
+        'You advise a person deciding what to start on a small farm in East Africa (farmline, a farm app).',
+        'Given what they told you, suggest ONE arrangement: which animals (cattle, goats, sheep, layers, broilers, pigs, bees, rabbits, fish) and/or crops (maize, beans, kale, potatoes, tomatoes, cabbage, onion, spinach and the like), with conservative starter numbers.',
+        `Write in ${lang === 'en' ? 'English' : lang}. At most 3 short sentences; plain words; no promises about money, safety or yield; no emojis; answer with the arrangement only.`,
+      ].join(' ');
+  const userMsg = mode === 'polish'
+    ? `The draft line to rewrite:\n${draft}\n\nWhat the person told us:\n${vitals}`
+    : `What the person told us:\n${vitals}`;
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${advisorKey}` },
+      signal: AbortSignal.timeout(45000),
+      body: JSON.stringify({
+        model, max_tokens: 220, temperature: 0.6,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: userMsg }],
+      }),
+    });
+    const j = await r.json().catch(() => null);
+    const reply = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+    if (!r.ok || !reply) {
+      console.warn('[farmline] advisor:', r.status, JSON.stringify(j).slice(0, 200));
+      return bad(res, 502, 'the advisor did not answer — the draft stands as built');
+    }
+    try { await metacounter.bump(key); } catch { /* never blocks */ }
+    return ok(res, { reply: String(reply).trim().slice(0, 600) });
+  } catch (e) {
+    console.warn('[farmline] advisor error:', e.message);
+    return bad(res, 502, 'the advisor did not answer — the draft stands as built');
+  }
 }));
 
 api.get('/meta/ladder', (req, res) => {
