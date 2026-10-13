@@ -55,6 +55,14 @@ function resolveMongoUri() {
       }
     } catch { /* try next */ }
   }
+  // THE FALLBACK KILLED (the founder, 2026-10-13: "delete every false
+  // invention... no future regression cures"). The old line `return local;`
+  // silently absorbed every missing-URI misconfiguration - production ran on
+  // the droplet's local mongod for weeks because of it. In production a
+  // missing URI is a BOOT REFUSAL, never a smile-and-write-to-disk.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[config] no database URI resolved - refusing to boot on a silent local fallback. Set MONGO_DB_URI_FARMLINE (or FARMLINE_USE_LOCAL_MONGO=true deliberately for dev).');
+  }
   return local;
 }
 

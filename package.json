@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "mongoose": "^8.5.0",
+    "mongoose": "8.14.1",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
