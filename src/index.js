@@ -168,6 +168,7 @@ app.get('/api/farmline/sitemap.xml', async (req, res) => {
     const today = new Date().toISOString().slice(0, 10);
     const urls = [
       '  <url><loc>' + base + '/farmline/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>',
+      '  <url><loc>' + base + '/farmline/farms</loc><changefreq>daily</changefreq><priority>0.8</priority></url>',
       '  <url><loc>' + base + '/farmline/guide</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>',
     ];
     for (const f of farms) {
@@ -2099,6 +2100,22 @@ ${image ? `<meta property="og:image" content="${escHtml(image)}" />` : ''}
 <meta name="twitter:description" content="${escHtml(description)}" />
 ${image ? `<meta name="twitter:image" content="${escHtml(image)}" />` : ''}
 <meta http-equiv="refresh" content="0; url=${escHtml(url)}" />
+<script type="application/ld+json">${JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'Store',
+    name: farm.name,
+    description,
+    url,
+    ...(image ? { image } : {}),
+    ...(farm.area ? { address: { '@type': 'PostalAddress', addressRegion: farm.area } } : {}),
+    makesOffer: (Array.isArray(shelf) ? shelf : []).filter((i) => i.qty > 0).slice(0, 25).map((i) => ({
+      '@type': 'Offer',
+      itemOffered: { '@type': 'Product', name: i.label || i.product },
+      price: i.price,
+      priceCurrency: 'KES',
+      availability: 'https://schema.org/InStock',
+    })),
+  }).replace(/</g, '\\u003c')}</script>
 </head>
 <body>
 <p><a href="${escHtml(url)}">${escHtml(title)}</a></p>
@@ -2114,6 +2131,99 @@ ${image ? `<meta name="twitter:image" content="${escHtml(image)}" />` : ''}
   return ok(res, {
     og: { title, description, image: farm.photo || '', url, products },
   });
+}));
+
+// ═══ THE FARMS HUB — the human-browsable door (the distribution list's #1) ════
+// The sitemap is machine-only; the ledger wanted a HUMAN page: every real farm
+// with a slug, newest first, each row a door into that farm's shop. Public,
+// index,follow (this page WANTS the machines), cached five minutes. The demo is
+// excluded (Kimani is the walk, not a shop); a farm with an empty shelf shows
+// without a count line rather than a fabricated one. The JSON-LD ItemList feeds
+// the machines the same truth the humans see.
+api.get('/farms', wrap(async (req, res) => {
+  const farms = await Farm.find(
+    { isDemo: { $ne: true }, slug: { $exists: true, $ne: '' } },
+    { name: 1, slug: 1, area: 1, county: 1, photo: 1, updatedAt: 1 },
+  ).sort({ updatedAt: -1 }).limit(100).lean();
+  const base = `${config.publicUrl}${config.basePath}`;
+  const rows = [];
+  for (const f of farms) {
+    let products = 0;
+    try {
+      const shelf = await projection.buildAvailability(String(f._id));
+      products = (Array.isArray(shelf) ? shelf : []).filter((i) => i.qty > 0).length;
+    } catch { /* the farm shows without a count rather than failing the page */ }
+    let photo = String(f.photo || '');
+    if (photo && !/^https?:\/\//i.test(photo)) photo = photo.startsWith('/') ? `${config.publicUrl}${photo}` : `${config.publicUrl}/${photo}`;
+    if (/^data:/i.test(photo)) photo = '';
+    rows.push({
+      name: String(f.name || ''), slug: String(f.slug), area: String(f.area || ''),
+      county: String(f.county || ''), photo, products,
+      url: `${base}/s/${f.slug}`,
+    });
+  }
+  const hubUrl = `${config.publicUrl}${config.basePath}/farms`;
+  const listJsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    itemListElement: rows.map((r, i) => ({
+      '@type': 'ListItem', position: i + 1, name: r.name, url: r.url,
+    })),
+  }).replace(/</g, '\\u003c');   // the XSS law: a farm name is DATA, never markup
+  const cards = rows.map((r) => `
+    <a class="farm" href="${escHtml(r.url)}">
+      ${r.photo ? `<img src="${escHtml(r.photo)}" alt="" loading="lazy" />` : `<span class="ph">${escHtml(r.name.slice(0, 1).toUpperCase())}</span>`}
+      <span class="farm__mid">
+        <b>${escHtml(r.name)}</b>
+        <span>${escHtml([r.area, r.county].filter(Boolean).join(', '))}</span>
+        ${r.products ? `<span class="on">${escHtml(String(r.products))} on the shelf now</span>` : ''}
+      </span>
+    </a>`).join('\n');
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>farmline farms — fresh from real smallholders</title>
+<meta name="description" content="Real farms on farmline: real records, real withdrawal holds honoured, order straight from the farmer." />
+<link rel="canonical" href="${escHtml(hubUrl)}" />
+<meta name="robots" content="index, follow" />
+<meta property="og:site_name" content="farmline" />
+<meta property="og:title" content="farmline farms" />
+<meta property="og:description" content="Real farms, real records, order straight from the farmer." />
+<meta property="og:url" content="${escHtml(hubUrl)}" />
+<meta name="twitter:card" content="summary" />
+<script type="application/ld+json">${listJsonLd}</script>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #F6F8F5; color: #17281E; }
+  main { max-width: 640px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 26px; letter-spacing: -0.02em; margin: 12px 0 4px; }
+  p.sub { color: #5C6B60; margin: 0 0 20px; font-size: 15px; }
+  .farm { display: flex; gap: 12px; align-items: center; background: #fff; border: 1px solid #E2E8E0;
+          border-radius: 14px; padding: 12px; margin-bottom: 10px; text-decoration: none; color: inherit; }
+  .farm img { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; flex: none; }
+  .farm .ph { width: 56px; height: 56px; border-radius: 10px; background: #1F6F43; color: #fff;
+              display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800; flex: none; }
+  .farm__mid { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .farm__mid b { font-size: 16.5px; }
+  .farm__mid span { font-size: 13.5px; color: #5C6B60; }
+  .farm__mid span.on { color: #1F6F43; font-weight: 650; }
+  footer { margin-top: 26px; font-size: 13px; color: #5C6B60; text-align: center; }
+  footer a { color: #1F6F43; }
+</style>
+</head>
+<body>
+<main>
+<h1>farmline farms</h1>
+<p class="sub">Real farms keeping real records — the withdrawal holds are honoured, the shelves are what the records say. Tap a farm to order straight from the farmer.</p>
+${cards || '<p class="sub">The farms are gathering — this page fills as farms open their shops.</p>'}
+<footer>a <a href="${escHtml(config.publicUrl + config.basePath + '/')}">farmline</a> page — your farm, in your pocket</footer>
+</main>
+</body>
+</html>`;
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.set('Cache-Control', 'public, max-age=300');
+  return res.status(200).send(html);
 }));
 
 api.get('/farm/:farmId/holds', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
