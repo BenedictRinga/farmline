@@ -956,6 +956,28 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
       'and the answer says LOCAL ONLY — a suggestion is never applied to everyone silently');
     const wrongKey = await fetch(`${ROOT}/api/farmline/translations/suggestions`, { headers: { 'x-admin-key': 'definitely-not-the-key' } });
     assert(wrongKey.status === 401 || wrongKey.status === 403, `the review queue refuses a WRONG key (${wrongKey.status})`);
+
+    // ── THE COPY-LAW GUARD (2026-10-13) — pure, so it needs no server and no model ──
+    const cg = require('../src/copyguard.js');
+    const refused = [
+      'Guaranteed returns on your goats.',
+      'This plan is risk-free.',
+      'A sure-fire way to double your money.',
+      'Our system cannot fail.',
+      'You will definitely earn a profit.',
+    ];
+    for (const bad of refused) {
+      assert(cg.check(bad).ok === false, `the guard refuses a promise: "${bad.slice(0, 34)}"`);
+    }
+    const allowed = [
+      'Two goats and four hens on a small plot — start with the records.',
+      'Your profit will depend on the rains and on the feed you can afford.',
+      'A modest start: maize on a quarter acre, then see the season out.',
+    ];
+    for (const good of allowed) {
+      assert(cg.check(good).ok === true, `and allows an honest line: "${good.slice(0, 34)}"`);
+    }
+    assert(cg.check(null).ok === true && cg.check('').ok === true, 'and an empty reply is not a promise (it fails elsewhere, honestly)');
   }
 
   // ════════════════════════════════════════════════════════════════════════════

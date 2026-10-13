@@ -40,6 +40,7 @@ const vocab = require('./vocab');
 const ladder = require('./ladder');
 const money = require('./money');
 const zu = require('./zu');
+const copyguard = require('./copyguard');   // the copy-law guard (the founder: "Do the filter")
 const chat = require('./chat');
 const updates = require('./updates');
 const schedule = require('./schedule');
@@ -461,6 +462,7 @@ api.get('/translations/suggestions', wrap(async (req, res) => {
 // Meeting's real lifecycle — and the WHITELIST is the guard: a caller cannot invent one.
 const MEETING_KINDS = [
   'meeting-open',      // the sheet was opened
+  'meeting-short',     // the investigator's CURTAILED path was taken (to compare conversion)
   'meeting-draft',     // the person reached the one draft
   'meeting-keep',      // the keep tap (the commit)
   'meeting-later',     // kept for later on the device
@@ -2963,12 +2965,12 @@ api.post('/advisor', express.json({ limit: '64kb' }), wrap(async (req, res) => {
     ? [
         'You rewrite ONE line describing a person\'s small farm plan for farmline, a farm app for East Africa.',
         'RULES: keep EXACTLY the same facts (the same animals, crops and place — add nothing, remove nothing).',
-        `Write in ${lang === 'en' ? 'English' : lang}. Warm, plain, concrete; at most 2 sentences; no promises about money, safety or yield; no emojis; answer with the rewritten line ONLY.`,
+        `Write in ${lang === 'en' ? 'English' : lang}. Warm and vivid; up to three short sentences - narrative is WELCOME, this line is the person's own farm described back to them; no promises about money, safety or yield; no emojis; answer with the rewritten line ONLY.`,
       ].join(' ')
     : [
         'You advise a person deciding what to start on a small farm in East Africa (farmline, a farm app).',
         'Given what they told you, suggest ONE arrangement: which animals (cattle, goats, sheep, layers, broilers, pigs, bees, rabbits, fish) and/or crops (maize, beans, kale, potatoes, tomatoes, cabbage, onion, spinach and the like), with conservative starter numbers.',
-        `Write in ${lang === 'en' ? 'English' : lang}. At most 3 short sentences; plain words; no promises about money, safety or yield; no emojis; answer with the arrangement only.`,
+        `Write in ${lang === 'en' ? 'English' : lang}. Up to four short sentences, with warmth and a little narrative; STILL NAME THE ANIMALS AND THE CROPS PLAINLY (goats, layers, maize, kale...), because a mechanical reader must recognise them in your own words and the plan is built from what it finds; no promises about money, safety or yield; no emojis; answer with the arrangement only.`,
       ].join(' ');
   const userMsg = mode === 'polish'
     ? `The draft line to rewrite:\n${draft}\n\nWhat the person told us:\n${vitals}`
@@ -3000,6 +3002,18 @@ api.post('/advisor', express.json({ limit: '64kb' }), wrap(async (req, res) => {
     // voice on screen until that tap. See meeting.component.ts.
     try { await metacounter.bump(key); } catch { /* never blocks */ }
     try { await metacounter.bump('advisor-global'); } catch { /* never blocks */ }
+    // ── THE COPY-LAW GUARD (2026-10-13) ────────────────────────────────────────
+    // The prompt forbids promises; the pitch CAME from a person's own words, so the prompt
+    // is not enough. A reply that promises is DECLINED here — never surgically edited —
+    // and the local draft stands, exactly as it does when the key is missing or the valve
+    // is shut. Refusals are COUNTED and logged, because a silent one is how a soft law rots
+    // and because the founder asked for as much logging as can be had to tweak the prompts.
+    const plea = copyguard.check(reply);
+    if (!plea.ok) {
+      console.warn('[farmline] advisor reply REFUSED by the copy-law guard:', plea.phrase);
+      try { await metacounter.bump('advisor-refused'); } catch { /* never blocks */ }
+      return bad(res, 502, 'the advisor did not answer - the draft stands as built');
+    }
     return ok(res, { reply: String(reply).trim().slice(0, 600) });
   } catch (e) {
     console.warn('[farmline] advisor error:', e.message);
@@ -3127,6 +3141,11 @@ server.listen(config.port, () => {
   // whether the ZU door is open (collection details published) — without them no
   // farmer can credit an account, and the paid rungs cannot be bought.
   console.log(`  dbName=${config.dbName}  auth=${auth.authArmed ? 'ARMED' : 'OPEN (set AUTH_SECRET)'}  zu=${zu.collectionOpen() ? 'door open' : 'CLOSED (set FARMLINE_ZU_COLLECTION)'}  unit=${zu.ZU_PER_USD} ZU/USD`);
+  // THE ADVISOR'S GROUND RULE (the founder, 2026-10-13: "Key already in location, so
+  // build model and it becomes ground rule"). The key is in place; the MODEL is named
+  // here so it is never a mystery which voice answers. Override with FARMLINE_ADVISOR_MODEL.
+  // The copy-law guard holds whatever model is chosen.
+  console.log(`[farmline] advisor model=${process.env.FARMLINE_ADVISOR_MODEL || 'deepseek/deepseek-chat'}  openrouter=${process.env.OPENROUTER_API_KEY ? 'armed' : 'NOT ARMED (the sheet works; the polish declines)'}`);
   console.log(`  chat=${io ? 'socket.io at /socket-farmline/ (+ REST)' : 'REST only (socket.io not installed)'}  env=${config.envName}`);
   migrateLegacyIndexes().catch((e) => console.warn('[farmline] index migration error:', e.message));
 });
