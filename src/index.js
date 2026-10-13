@@ -2879,16 +2879,15 @@ api.post('/advisor', express.json({ limit: '64kb' }), wrap(async (req, res) => {
       console.warn('[farmline] advisor:', r.status, JSON.stringify(j).slice(0, 200));
       return bad(res, 502, 'the advisor did not answer — the draft stands as built');
     }
-    // THE COPY-LAW FILTER (the appraisal's fix C): the vitals are user-typed
-    // text and the reply becomes THE DRAFT — farmline's own words on screen.
-    // A prompt-injected promise ("guaranteed profit") must never render as
-    // ours. A promise-shaped reply is refused and the local draft stands —
-    // the SAME honest degradation a 502 already gets, and no allowance burns.
-    const ADISOR_PROMISE_RE = /guarantee|guaranteed|guaranti|risk[- ]free|no[- ]loss|100%|assured (income|profit|return)|hakikishwa|bila hatari|bila hasara|hakuna hasara/i;
-    if (ADISOR_PROMISE_RE.test(String(reply))) {
-      console.warn('[farmline] advisor: promise-shaped reply rejected');
-      return bad(res, 502, 'the advisor did not answer — the draft stands as built');
-    }
+    // THE COPY LAW'S ENFORCEMENT MOVED (the founder's correction, 2026-10-13):
+    // the word-list filter tried to police promises in five languages from an
+    // English-default list with a Swahili tail — a strange expression forced on
+    // languages it doesn't belong to, and blind to fr/ha/am besides. The law is
+    // now enforced ARCHITECTURALLY in the client: the advisor's reply is never
+    // rendered as farmline's own words — it arrives ATTRIBUTED (the advisor's
+    // suggestion) and becomes the farm's line only when the person adopts it by
+    // tap. The local engine — whose copy was born under the law — remains the
+    // voice on screen until that tap. See meeting.component.ts.
     try { await metacounter.bump(key); } catch { /* never blocks */ }
     try { await metacounter.bump('advisor-global'); } catch { /* never blocks */ }
     return ok(res, { reply: String(reply).trim().slice(0, 600) });
