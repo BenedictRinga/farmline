@@ -357,5 +357,23 @@ Local dev runs on **port 4600** (4200 and 4400 are taken by other projects).
    `* * * * * /usr/bin/curl -sf -m 5 http://127.0.0.1:4600/health || sudo -u appuser -H PM2_HOME=/home/appuser/.pm2 /home/appuser/.nvm/versions/node/v20.18.3/bin/pm2 resurrect >> /var/log/farmline-watch.log 2>&1`
    — the TRUE pm2 path (resolve with the login shell: which pm2), the explicit PM2_HOME, and the failures LOGGED (/var/log/farmline-watch.log), never discarded. A watch's own failure must always leave a trace.
 
+## THE DATABASE ARCHITECTURE — THE ONLY TOPOLOGY (2026-10-13, the founder's order: "delete every false invention and name them")
+
+| Environment | farmline-server writes to | How it resolves |
+|---|---|---|
+| **PRODUCTION** (droplet) | **Atlas `cluster0.hiyrg7y`, db `farmline`** — the SAME cluster zyppar production runs on | `MONGO_DB_URI_FARMLINE` in `/opt/farmline-server/.env` — config.js reads it FIRST |
+| **DEVELOPMENT** (dev machine) | the dev machine's mongod, db `farmline` | `FARMLINE_USE_LOCAL_MONGO=true` in the dev `.env` |
+
+**THE LAWS (violation = regression, not a cure):**
+1. Every database location is a **named var** in the owning app's `.env`. No derivation by borrowed names (`MONGO_DB_URI_PAID` was never farmline's), no string surgery on URIs, no cross-repo assumptions.
+2. The dev/prod default follows **NODE_ENV** — production defaults to the remote cluster, never to a local disk.
+3. **No silent fallback.** config.js REFUSES TO BOOT in production without a resolved URI (the old `return local;` kept production on the droplet's local mongod for weeks — it is DEAD, do not resurrect it).
+4. A migration's read-back connects by the **literal destination host** — never by the same derivation that performed the write.
+5. The data lives on Atlas: 6 farms, the visits/ledgers/logs — the droplet's local mongod is a FROZEN fallback copy (the weekly dump cron covers it; Atlas backups cover production). The CommandCenter wire (zypparserver) reads the SAME Atlas db.
+6. `mongoose` is PINNED 8.14.1 (zyppar's proven version). Caret drift on the ORM is an environment-conflation vector — audit pins at deploy.
+7. The `.join` crash on connect = an SRV URI carrying a single SHARD host (`ac-u710tbt-shard-00-01…`). `mongodb+srv://` requires the cluster SEED (`cluster0…`). Take URIs verbatim from an env that proves it works — never from a probe's connected-host field.
+
+THE FALSE INVENTIONS RETIRED (named so no future session resurrects them): [a] the inverted default (`FARMLINE_USE_LOCAL_MONGO` defaulting true in production) · [b] the silent `return local` fallback · [c] the phantom derivation from `MONGO_DB_URI_PAID` (a var farmline's env never had) · [d] the shard-host URI (the magister's own error, owned) · [e] the self-referential "migration" whose read-back used the same broken derivation.
+
 ## THE UPDATES FREEZE ZONE
 farmline-app/src/app/core/updates.service.ts + farmline/src/updates.js are the verbatim LoopKeeper clone with the served-bundle clock — the founder-ordered final shape, repaired three times after regressions. DO NOT ALTER either file without the founder explicit word; diff-audit both at every session start and end; report foreign changes immediately.
