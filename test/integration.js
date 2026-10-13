@@ -1082,6 +1082,52 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   }
 
   // ════════════════════════════════════════════════════════════════════════════
+  // === M7. THE MEETING'S LIFECYCLE DOOR (2026-10-13 — the client hooks' receipt)
+  // The nine kinds are the Meeting's whitelisted lifecycle; every one must land
+  // as 200 in the SAME visits ledger the beacon feeds, and a caller cannot
+  // invent an eleventh. This is the proof that the hooks the client fires have
+  // a door that receives them — the analytics rows fill, or the hooks are lying.
+  console.log('\n=== M7. the meeting door — the nine kinds land, an invented kind cannot ===');
+  const MEETING_KINDS = ['meeting-open', 'meeting-draft', 'meeting-keep', 'meeting-later', 'meeting-demo', 'meeting-crop', 'meeting-ai-arrange', 'meeting-ai-polish', 'meeting-ai-fail'];
+  let kindFails = 0;
+  for (const k of MEETING_KINDS) {
+    const r = await req('POST', '/meeting/event', { body: { event: k } });
+    if (!(r.status === 200 && r.body?.noted === k)) kindFails++;
+  }
+  assert(kindFails === 0, `all nine lifecycle kinds are received by the ledger (${MEETING_KINDS.length - kindFails}/${MEETING_KINDS.length})`);
+  const invented = await req('POST', '/meeting/event', { body: { event: 'meeting-bogus' } });
+  assert(invented.status === 400, `an invented kind is refused (${invented.status})`);
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // === M8. THE FARMS HUB (2026-10-13 — the distribution list's #1, proven)
+  // The human-browsable door: HTML, no demo farm, the ItemList JSON-LD, and the
+  // SAME stored-XSS law as the OG card — the hub lists farmer-authored names on
+  // our origin, so the escaping is asserted with a LIVE probe (the test farm has
+  // a slug, so it appears in the hub; rename → fetch → assert → restore).
+  console.log('\n=== M8. the farms hub — human-browsable, escaped, honest ===');
+  const hubRes = await fetch(`${ROOT}/api/farmline/farms`);
+  const hubHtml = await hubRes.text();
+  assert(hubRes.status === 200 && String(hubRes.headers.get('content-type') || '').includes('text/html'),
+    `the hub answers as HTML (${hubRes.status}, ${String(hubRes.headers.get('content-type') || '').slice(0, 32)})`);
+  assert(hubHtml.includes('farmline farms'), 'the hub carries its heading');
+  // THE DEMO'S EXCLUSION, by identity not by word: the dev database carries smoke
+  // farms a human named "Kimani's Farm" — the word matches them too. The DEMO is
+  // the farm the demo door issues; the hub must not carry THAT slug.
+  const demoDoor = await req('POST', '/auth/demo', {});
+  const demoSlug = String(demoDoor.body?.farm?.slug || '');
+  if (demoSlug) assert(!hubHtml.includes(`/farmline/s/${demoSlug}`), `the demo farm is excluded (the demo door's slug ${demoSlug} is not a shop row)`);
+  assert(hubHtml.includes('application/ld+json') && hubHtml.includes('ItemList'), 'the hub carries the ItemList JSON-LD for the machines');
+  assert(hubHtml.includes(`/farmline/s/${slug}`), 'the registered test farm appears in the hub (it has a slug)');
+  // THE ESCAPING, with the hub's OWN probe (the OG leg's probe name is scoped
+  // to that leg's block): rename the test farm, fetch the hub, assert, restore.
+  const hubProbeName = 'probe <b>bold</b> & "quoted"';
+  const hubOrigName = 'probe hub farm';
+  await req('PATCH', `/farm/${farmId}/profile`, { token, body: { name: hubProbeName } });
+  const hubEscaped = await (await fetch(`${ROOT}/api/farmline/farms`)).text();
+  assert(!hubEscaped.includes('<b>bold</b>'), 'a markup-carrying farm name arrives escaped or absent on the hub (no stored XSS page-wide)');
+  await req('PATCH', `/farm/${farmId}/profile`, { token, body: { name: hubOrigName } });
+
+  // ════════════════════════════════════════════════════════════════════════════
   // § AUTH (A4 — the fail-fast): production without AUTH_SECRET is CLOSED (503 on
   // every gated route), while the development grace still admits the dev
   // principal. Verified in a CHILD PROCESS (auth.js caches the secret at require
