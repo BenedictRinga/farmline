@@ -163,6 +163,10 @@ const plotSchema = new Schema({
   soil: { type: String, default: '' },
   water: { type: String, default: '' },
   notes: { type: String, default: '' },
+  // THE MEETING (2026-10-13, the appraisal's fix A): the keep's idempotency —
+  // a retried apply (a partial failure, a second tap) dedupes on this key
+  // instead of duplicating the holding. The log route's own pattern, extended.
+  clientId: { type: String, index: true },
 }, { timestamps: true });
 
 const cropCycleSchema = new Schema({
@@ -195,6 +199,8 @@ const cropCycleSchema = new Schema({
   fodderFor: { type: String, default: '' },     // 'dairy' when the crop feeds stock
   status: { type: String, enum: ['planned', 'growing', 'harvested', 'failed'], default: 'planned' },
   yield: { quantity: Number, unit: String, harvestedOn: Date },
+  // THE MEETING (2026-10-13, the appraisal's fix A): the keep's idempotency key.
+  clientId: { type: String, index: true },
 }, { timestamps: true });
 
 // ── ANIMALS ───────────────────────────────────────────────────────────────────
@@ -212,6 +218,8 @@ const animalGroupSchema = new Schema({
   count: { type: Number, default: 0 },
   productionKind: { type: String, default: '' },// milk | eggs | none
   active: { type: Boolean, default: true },
+  // THE MEETING (2026-10-13, the appraisal's fix A): the keep's idempotency key.
+  clientId: { type: String, index: true },
 }, { timestamps: true });
 
 plotSchema.index({ farmId: 1, archivedAt: 1 });

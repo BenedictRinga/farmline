@@ -276,6 +276,9 @@ const healthPayload = () => ({
 const healthPayloadAsync = async () => {
   const base = healthPayload();
   try { base.visionCallsToday = await metacounter.count('vision-demo'); } catch { /* absent, not wrong */ }
+  // THE ADVISOR'S SPEND, VISIBLE (the appraisal's fix B): the global count is
+  // discovered on the invoice never — it rides the health payload.
+  try { base.advisorToday = await metacounter.count('advisor-global'); } catch { /* absent, not wrong */ }
   // ── THE OPERATOR'S QUEUE (2026-10-13, Task 11.1) ─────────────────────────────
   // The claim -> confirm door needs a HUMAN, and nothing pushed it: a farmer could
   // pay, file a claim, and wait in silence while CommandCenter showed a number nobody
@@ -448,6 +451,30 @@ api.get('/translations/suggestions', wrap(async (req, res) => {
   const q = lang ? { lang } : {};
   const rows = await conn.db.collection('translationsuggestions').find(q).sort({ at: -1 }).limit(200).toArray();
   return ok(res, { suggestions: rows });
+}));
+
+// ── THE MEETING'S LEDGER DOOR (2026-10-13) ─────────────────────────────────────
+// The intake sheet writes its own facts into the SAME visits ledger the Beacon feeds, so
+// every existing reader (byKind, d24/d7, uniques, the prior window, the crawler
+// exclusion) sees the Meeting without a single new aggregation. The kinds are the
+// Meeting's real lifecycle — and the WHITELIST is the guard: a caller cannot invent one.
+const MEETING_KINDS = [
+  'meeting-open',      // the sheet was opened
+  'meeting-draft',     // the person reached the one draft
+  'meeting-keep',      // the keep tap (the commit)
+  'meeting-later',     // kept for later on the device
+  'meeting-demo',      // "show me one first" — the Kimani walk
+  'meeting-crop',      // the mid-season handoff into the existing crop-start
+  'meeting-ai-arrange',// the advisor answered "what suits your place"
+  'meeting-ai-polish', // the advisor polished the one line
+  'meeting-ai-fail',   // the advisor was absent, capped or silent (the local draft stood)
+];
+api.post('/meeting/event', shellBeaconRateLimit, wrap(async (req, res) => {
+  const kind = String(req.body?.event || '').trim().toLowerCase();
+  if (!MEETING_KINDS.includes(kind)) return bad(res, 400, 'unknown meeting event');
+  // The SAME recorder the auth doors use: at / kind / ip / ua / ref / src. Never blocks.
+  fl_recordVisit(req, kind);
+  return ok(res, { noted: kind });
 }));
 
 api.post('/visit', shellBeaconRateLimit, wrap(async (req, res) => {
@@ -971,7 +998,14 @@ api.post('/farm/:farmId/vision/stage', visionBody, auth.requireAuth('farmer'), a
 api.post('/farm/:farmId/plots', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
   const { name, acres = 0, soil = '', water = '' } = req.body || {};
   if (!name) return bad(res, 400, 'plot name required');
-  const plot = await Plot.create({ farmId: req.params.farmId, name, acres, soil, water });
+  // THE MEETING (2026-10-13, the appraisal's fix A): the keep's idempotency —
+  // a retried apply returns the holding it already made, never a duplicate.
+  const clientId = String(req.body?.clientId || '');
+  if (clientId) {
+    const seen = await Plot.findOne({ farmId: req.params.farmId, clientId }).lean();
+    if (seen) return ok(res, { plot: seen, duplicate: true });
+  }
+  const plot = await Plot.create({ farmId: req.params.farmId, name, acres, soil, water, clientId: clientId || undefined });
   return ok(res, { plot });
 }));
 
@@ -1005,7 +1039,15 @@ api.post('/farm/:farmId/groups', auth.requireAuth('farmer'), auth.requireFarmSco
   if (!protocols.speciesList().includes(String(species))) {
     return bad(res, 400, `unknown species. Seeded: ${protocols.speciesList().join(', ')}`);
   }
-  const group = await AnimalGroup.create({ farmId: req.params.farmId, species, label, count, productionKind });
+  // THE MEETING (2026-10-13, the appraisal's fix A): the keep's idempotency —
+  // a retried apply returns the herd it already built, never a duplicate
+  // (and never a second materialised schedule).
+  const clientId = String(req.body?.clientId || '');
+  if (clientId) {
+    const seen = await AnimalGroup.findOne({ farmId: req.params.farmId, clientId }).lean();
+    if (seen) return ok(res, { group: seen, scheduled: 0, duplicate: true });
+  }
+  const group = await AnimalGroup.create({ farmId: req.params.farmId, species, label, count, productionKind, clientId: clientId || undefined });
   // Setting the group up materialises its whole schedule — the farmer configures
   // nothing. This is the difference between a work list and a template library.
   const farm = await Farm.findById(req.params.farmId);
@@ -1084,12 +1126,22 @@ api.post('/farm/:farmId/crops', auth.requireAuth('farmer'), auth.requireFarmScop
     status = anchor ? 'growing' : 'planned';
   }
 
+  // THE MEETING (2026-10-13, the appraisal's fix A): the keep's idempotency —
+  // a retried apply returns the cycle it already planted, never a duplicate
+  // (and never a second materialised calendar).
+  const cropClientId = String(req.body?.clientId || '');
+  if (cropClientId) {
+    const seenCycle = await CropCycle.findOne({ farmId: req.params.farmId, clientId: cropClientId }).lean();
+    if (seenCycle) return ok(res, { cycle: seenCycle, scheduled: 0, entry, estimated: 0, duplicate: true });
+  }
+
   const cycle = await CropCycle.create({
     farmId: req.params.farmId, plotId, crop, variety, acres, season,
     plantedOn: entry === 'today' ? null : anchor,
     plantedOnEstimated: plantedEstimated,
     cycleStartOn: cycleStart,
     fodderFor, status,
+    clientId: cropClientId || undefined,
   });
   const built = await schedule.materialise({
     farmId: req.params.farmId, subjectType: 'cropcycle', subjectId: cycle._id,
@@ -2775,6 +2827,15 @@ api.get('/meta/protocols', (_req, res) => {
 api.post('/advisor', express.json({ limit: '64kb' }), wrap(async (req, res) => {
   const mode = req.body?.mode === 'polish' ? 'polish' : 'arrange';
   const lang = ['en', 'sw', 'fr', 'ha', 'am'].includes(String(req.body?.lang)) ? String(req.body.lang) : 'en';
+  // THE GLOBAL CEILING (the appraisal's fix B): a public, deliberately free
+  // door is right for the user and uncapped for the bill — the per-IP and
+  // per-farm valves cannot see a proxy pool or a botnet. One env-tunable daily
+  // ceiling after which the advisor rests for EVERYONE; the local draft stands
+  // (the sheet is complete without the AI). The count surfaces in /health.
+  const globalCap = Number(process.env.FARMLINE_ADVISOR_GLOBAL_DAILY || 300);
+  if (await metacounter.count('advisor-global') >= globalCap) {
+    return bad(res, 429, 'the advisor rests for today — the draft stands as built');
+  }
   // THE CAP — the valve first.
   const payload = auth.verify(auth.bearer(req));
   const isFarmer = payload?.typ === 'farmer';
@@ -2812,13 +2873,24 @@ api.post('/advisor', express.json({ limit: '64kb' }), wrap(async (req, res) => {
         messages: [{ role: 'system', content: system }, { role: 'user', content: userMsg }],
       }),
     });
-    const j = await r.json().catch(() => null);
+        const j = await r.json().catch(() => null);
     const reply = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
     if (!r.ok || !reply) {
       console.warn('[farmline] advisor:', r.status, JSON.stringify(j).slice(0, 200));
       return bad(res, 502, 'the advisor did not answer — the draft stands as built');
     }
+    // THE COPY-LAW FILTER (the appraisal's fix C): the vitals are user-typed
+    // text and the reply becomes THE DRAFT — farmline's own words on screen.
+    // A prompt-injected promise ("guaranteed profit") must never render as
+    // ours. A promise-shaped reply is refused and the local draft stands —
+    // the SAME honest degradation a 502 already gets, and no allowance burns.
+    const ADISOR_PROMISE_RE = /guarantee|guaranteed|guaranti|risk[- ]free|no[- ]loss|100%|assured (income|profit|return)|hakikishwa|bila hatari|bila hasara|hakuna hasara/i;
+    if (ADISOR_PROMISE_RE.test(String(reply))) {
+      console.warn('[farmline] advisor: promise-shaped reply rejected');
+      return bad(res, 502, 'the advisor did not answer — the draft stands as built');
+    }
     try { await metacounter.bump(key); } catch { /* never blocks */ }
+    try { await metacounter.bump('advisor-global'); } catch { /* never blocks */ }
     return ok(res, { reply: String(reply).trim().slice(0, 600) });
   } catch (e) {
     console.warn('[farmline] advisor error:', e.message);
