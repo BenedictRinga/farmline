@@ -373,7 +373,7 @@ api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
  * Read from the BODY, so every door can carry it — the app knows how it was launched
  * and sends the same tag on the beacon, the register, the demo and the customer mint.
  */
-const VISIT_SRC = ['app', 'shop', 'settings', 'demo', 'guide', 'buyer', 'status'];
+const VISIT_SRC = ['app', 'shop', 'settings', 'demo', 'guide', 'buyer', 'status', 'founder']; // 'founder' = the founder's own device (his daily walks are legitimate traffic but HIS - the aggregations separate them from farmer traffic without excluding him)
 function cleanSrc(v) {
   const s = String(v || '').trim().toLowerCase().slice(0, 20);
   return VISIT_SRC.includes(s) ? s : '';
