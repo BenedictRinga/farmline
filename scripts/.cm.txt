@@ -1,1 +1,0 @@
-THE REGISTERED-FARMS LIST probe (the founder's request for the full particulars) - committed as scripts/farms-list-20261013.sh for reuse: every farm with owner/slug/county/created + records/animals/groups/plots/crops/orders/shopItems + the demo marker, from the ONE Atlas database.
