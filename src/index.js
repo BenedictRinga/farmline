@@ -164,7 +164,10 @@ app.get(['/health', config.basePath + '/health'], async (_req, res) => res.json(
 // every farm with a slug. Public, no auth, XML.
 app.get('/api/farmline/sitemap.xml', async (req, res) => {
   try {
-    const farms = await Farm.find({}, { slug: 1, name: 1, updatedAt: 1 }).sort({ updatedAt: -1 }).limit(500).lean();
+    // THE SITEMAP SCOPE-OFF (2026-10-14, the founder: "scope off kimani farms"):
+    // the demo farm and probe artifacts are NOT asked of the indexers — the
+    // shop fronts stay crawlable by discovery, they just don't ride the sitemap.
+    const farms = await Farm.find({ isDemo: { $ne: true }, slug: { $nin: ['kimani-farms'], $not: /persist-probe/ } }, { slug: 1, name: 1, updatedAt: 1 }).sort({ updatedAt: -1 }).limit(500).lean();
     const base = 'https://zyppar.com';
     const today = new Date().toISOString().slice(0, 10);
     const urls = [
