@@ -73,7 +73,12 @@ function resolveMongoUri() {
   return local;
 }
 
-const DB_NAME = 'farmline'; // enforced at connect time — see AGENTS.md
+// THE TEST DATABASE (2026-10-13). The default is unchanged - the app still uses
+// "farmline" - but the name is now overridable so the TEST SUITES can be sent somewhere
+// else. They were writing into the app's own database: of 245 non-demo rows locally, 244
+// were artifacts ("Contract Farm N", "Chat Farm N", the demo re-seeds) against ONE real
+// farm. A real farmer has to be findable in the database.
+const DB_NAME = envVar('FARMLINE_DB_NAME', 'farmline');
 
 const config = {
   port: Number(envVar('PORT', '4600')),          // 4200 and 4400 are taken by other projects

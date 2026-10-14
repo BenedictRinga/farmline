@@ -13,6 +13,10 @@ const net = require('net');
 
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.SMOKE_PORT || 4699);
+// THE ONE DATABASE NAME FOR THE WHOLE RUN: the server child AND the test child must both be
+// told it, because the test file talks to the models directly. One child inheriting it is not
+// the same as the run inheriting it.
+const TEST_DB = process.env.SMOKE_DB_NAME || 'farmline_test';
 const BASE = `http://127.0.0.1:${PORT}`;
 
 function portFree() {
@@ -35,7 +39,14 @@ function portFree() {
 
   const child = spawn(process.execPath, [path.join(ROOT, 'src', 'index.js')], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), NODE_ENV: process.env.NODE_ENV || 'development' },
+    // THE TESTS GET THEIR OWN DATABASE (2026-10-13): every run used to write its artifacts
+    // into the database the farmers use. "farmline_test" by default; override with SMOKE_DB_NAME.
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      NODE_ENV: process.env.NODE_ENV || 'development',
+      FARMLINE_DB_NAME: TEST_DB,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -73,10 +84,16 @@ function portFree() {
 
   const health = await fetch(BASE + '/health').then((r) => r.json()).catch(() => null);
   console.log(`  ok    server healthy — db=${health?.db} dbName=${health?.dbName} auth=${health?.authArmed ? 'ARMED' : 'OPEN'} money=${health?.moneyMode}`);
-  if (health?.dbName !== 'farmline') {
-    console.error(`  FATAL the server is connected to "${health?.dbName}", not "farmline" — refusing to test.`);
+  // THE GUARD, INVERTED (2026-10-13). It used to REFUSE anything but "farmline" - which
+  // made a test database impossible and guaranteed the pollution. Now it refuses the REAL
+  // database: a test run may never write its farms into the place real farmers live. A
+  // database explicitly named for testing is the only thing accepted.
+  const dbName = String(health?.dbName || '');
+  if (!/_test$/.test(dbName)) {
+    console.error(`  FATAL the smoke is pointed at "${dbName}" - not a *_test database. Refusing to write test farms into it.`);
     stop(); process.exit(1);
   }
+  console.log(`  ok    the test database is "${dbName}" - the app's own database is untouched`);
 
   // Three suites, in order:
   //   1. integration.js  — does the server BEHAVE?
@@ -88,7 +105,7 @@ function portFree() {
   const run = (file) => new Promise((resolve) => {
     const t = spawn(process.execPath, [path.join(ROOT, 'test', file)], {
       cwd: ROOT,
-      env: { ...process.env, FARMLINE_TEST_BASE: BASE },
+      env: { ...process.env, FARMLINE_TEST_BASE: BASE, FARMLINE_DB_NAME: TEST_DB },
       stdio: 'inherit',
     });
     t.on('exit', resolve);

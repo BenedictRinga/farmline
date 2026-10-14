@@ -135,6 +135,13 @@ async function claimDaily({ farmId, amountZU, day, note = '' }) {
   if (!amount) return { ok: false, error: 'the allowance is zero — nothing to credit' };
   if (!key) return { ok: false, error: 'the allowance needs a day key' };
   try {
+    // ── THE LOCK, GUARANTEED PRESENT (2026-10-14) ─────────────────────────────────
+    // The "once a day" promise was resting on a unique index that this server never waits
+    // for: Mongoose builds indexes in the background, so on a fresh database — a deploy, a
+    // restore, a migration — `create` cannot collide and the allowance pays twice. init()
+    // resolves once the indexes are built, and Mongoose memoises it, so this costs nothing
+    // after the first call. The guarantee now rests on the index EXISTING.
+    await Ledger.init();
     const row = await Ledger.create({
       farmId,
       customerId: null,
