@@ -377,3 +377,6 @@ THE FALSE INVENTIONS RETIRED (named so no future session resurrects them): [a] t
 
 ## THE UPDATES FREEZE ZONE
 farmline-app/src/app/core/updates.service.ts + farmline/src/updates.js are the verbatim LoopKeeper clone with the served-bundle clock — the founder-ordered final shape, repaired three times after regressions. DO NOT ALTER either file without the founder explicit word; diff-audit both at every session start and end; report foreign changes immediately.
+
+## THE SITEMAP ALIAS (2026-10-14, founder-approved)
+`/farmline/sitemap.xml` now proxies to the farmline API sitemap (`http://localhost:4600/api/farmline/sitemap.xml`) as an exact-match nginx location placed BEFORE the `/farmline/` prefix block. WHY: the GSC farmline property (URL-prefix `https://zyppar.com/farmline/`) probes a sitemap under its own prefix; the old shape served the SPA shell (text/html) - the "Sitemap is HTML" GSC error. Both sitemap URLs now serve the same `application/xml` (the API Content-Type is preserved through the proxy). Backup: `zyppar.com.bak-20261013-sitemapalias`. The `/api/farmline/sitemap.xml` URL remains valid for the main zyppar.com property. GSC actions: submit `/farmline/sitemap.xml` in the farmline property; the "Sitemap is HTML" error clears on GSC next read.
