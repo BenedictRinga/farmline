@@ -379,15 +379,56 @@ function cleanSrc(v) {
   return VISIT_SRC.includes(s) ? s : '';
 }
 
+// ── THE VISIT-LEDGER GUARDRAIL (the founder, 2026-10-13: "guardrail the
+// integrity of the logs") — the credence audit found ~85% of all visits were
+// OUR OWN footprint: the droplet's own IP (health checks, the watch cron, the
+// magister's canaries) and the founder's device. Five guards, applied HERE —
+// the one door every visitor row passes — so every aggregation inherits them.
+// (Mirrors zyppar's crawlerDetect doctrine: classify, never block.)
+
+// [1] THE SELF-TALK EXCLUSION — these addresses are the house talking to
+// itself (health checks, the watch cron, smoke tests, our own probes). A row
+// from them is noise, and noise has no place in a ledger humans are measured by.
+const SELF_HOSTS = new Set([
+  '127.0.0.1', '::1', 'localhost',
+  '178.128.34.40', // the droplet's own public address (curl from the box, the watch, our probes)
+]);
+
+// [2] THE CRAWLER MARKS — the preview bots (WhatsApp/Telegram/Slack fetch a
+// shared farm link to build the card) and the searchers. They are REAL traffic
+// (the share engine!) but they are NOT farmers — they are marked so the
+// human-funnel aggregations can exclude them and the register can badge them.
+const CRAWLER_UA = /facebookexternalhit|WhatsApp|TelegramBot|Twitterbot|LinkedInBot|Slackbot|Discordbot|Googlebot|bingbot|YandexBot|DuckDuckBot|curl\//i;
+
+// [3] THE RATE GUARD — an in-memory per-IP+kind throttle: more than 30 of one
+// kind in 60s from one address is a flood, not a farmer (the smoke suites and
+// a runaway loop both look like that). The excess rows are DROPPED, never queued.
+const _visitThrottle = new Map(); // key ip|kind -> {count, windowStart}
+
 function fl_recordVisit(req, kind) {
   try {
+    // THE HONEST MISSING-IP [4]: a spoofed/absent address records unknown,
+    // never a fabricated value.
+    const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().slice(0, 64) || 'unknown';
+    if (SELF_HOSTS.has(ip)) return; // [1] the house is not a visitor
+    const ua = String(req.headers['user-agent'] || '').slice(0, 180);
+    const isCrawler = CRAWLER_UA.test(ua);
+    // [3] the flood cap - 30 of one kind per minute per address
+    const now = Date.now();
+    const key = ip + '|' + kind;
+    const t = _visitThrottle.get(key);
+    if (!t || now - t.windowStart > 60000) _visitThrottle.set(key, { count: 1, windowStart: now });
+    else if (++t.count > 30) return; // the excess is dropped - a flood is not data
     const c = conn.db.collection('visits');
     c.insertOne({
       at: new Date(), kind,
-      ip: String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().slice(0, 64),
-      ua: String(req.headers['user-agent'] || '').slice(0, 180),
-      ref: String(req.headers.referer || '').slice(0, 240),
-      // '' when untagged — an absent tag is honest, a guessed one is not.
+      ip,
+      // [2] the crawler marks - real traffic, honestly labeled
+      isCrawler,
+      crawlerName: isCrawler ? (ua.match(CRAWLER_UA)[0] || 'crawler').slice(0, 40) : '',
+      ua,
+      ref: String(req.headers['referer'] || '').slice(0, 240),
+      // '' when untagged - an absent tag is honest, a guessed one is not.
       src: cleanSrc(req.body?.src),
     }).catch(() => { /* the ledger never blocks an auth flow */ });
   } catch { /* never blocks */ }
