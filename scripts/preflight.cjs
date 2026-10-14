@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const dns = require('dns');
 
 const ROOT = path.join(__dirname, '..');
 let fatal = 0;
@@ -149,12 +150,46 @@ function probeMongo() {
     if (!m) return resolve();
     const host = m[1];
     const mport = Number(m[2] || 27017);
-    const s = net.createConnection({ host, port: mport });
-    const done = (fn) => { s.destroy(); fn(); resolve(); };
-    s.setTimeout(2500);
-    s.once('connect', () => done(() => pass(`mongod reachable at ${host}:${mport}`)));
-    s.once('timeout', () => done(() => bad(`mongod at ${host}:${mport} did not respond — the server will boot and serve nothing`)));
-    s.once('error', (e) => done(() => bad(`mongod at ${host}:${mport} unreachable (${e.code}) — is mongod running?`)));
+    const isSrv = /mongodb\+srv:\/\//.test(uri);
+    // THE SRV LAW (2026-10-13, the founder's deploy blocked by a false FATAL):
+    // a `mongodb+srv://` host is a SEED — it carries NO direct :27017 listener;
+    // the driver resolves the _mongodb._tcp SRV records first. The old raw TCP
+    // probe against the seed failed with ENOTFOUND on a perfectly healthy
+    // cluster. For SRV: resolve the records, probe the REAL shard hosts, pass
+    // when ANY answers. For a plain mongodb:// (localhost mongod), the raw
+    // probe is correct as written.
+    if (!isSrv) {
+      const s = net.createConnection({ host, port: mport });
+      const done = (fn) => { s.destroy(); fn(); resolve(); };
+      s.setTimeout(2500);
+      s.once('connect', () => done(() => pass(`mongod reachable at ${host}:${mport}`)));
+      s.once('timeout', () => done(() => bad(`mongod at ${host}:${mport} did not respond — the server will boot and serve nothing`)));
+      s.once('error', (e) => done(() => bad(`mongod at ${host}:${mport} unreachable (${e.code}) — is mongod running?`)));
+      return;
+    }
+    dns.resolveSrv('_mongodb._tcp.' + host, (err, records) => {
+      if (err || !records || !records.length) {
+        bad(`SRV lookup for ${host} failed (${err ? err.code : 'no records'}) — the Atlas cluster's DNS is unreachable from this machine`);
+        return resolve();
+      }
+      const targets = records.map(r => ({ host: r.name, port: r.port }));
+      let settled = 0, reachable = 0;
+      const finish = () => {
+        settled++;
+        if (settled < targets.length) return;
+        if (reachable > 0) pass(`Atlas cluster reachable — ${reachable}/${targets.length} shard hosts answered (seed ${host})`);
+        else bad(`Atlas cluster UNREACHABLE — 0/${targets.length} shard hosts answered (seed ${host}; credentials/firewall?)`);
+        resolve();
+      };
+      for (const t of targets) {
+        const s = net.createConnection({ host: t.host, port: t.port });
+        const done = (fn) => { try { s.destroy(); } catch { } fn(); };
+        s.setTimeout(3000);
+        s.once('connect', () => { reachable++; done(finish); });
+        s.once('timeout', () => done(finish));
+        s.once('error', () => done(finish));
+      }
+    });
   });
 }
 
