@@ -1150,6 +1150,42 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   await req('PATCH', `/farm/${farmId}/profile`, { token, body: { name: hubOrigName } });
 
   // ════════════════════════════════════════════════════════════════════════════
+  // === M9. THE NEW YIELD SURFACES (the meat/honey/fish spec, 2026-10-13) ======
+  // THE WRITE PROOFS the spec's gates ordered: one honey, one fish, one live
+  // sale — each proven end to end (the write lands, the shelf derives from it,
+  // a retried write is the SAME record, and the herd decrements by the sale —
+  // the system decrements, never a manual edit).
+  console.log('\n=== M9. honey + fish reach the shelf; the live sale decrements the herd ===');
+  const honeySellable = await req('POST', `/farm/${farmId}/sellables`, { token, body: { product: 'honey', label: 'Honey', unit: 'kg', price: 600, source: { kind: 'production', product: 'honey', windowDays: 120 } } });
+  assert(honeySellable.status === 200, 'the honey sellable is set');
+  const honeyLog = await req('POST', `/farm/${farmId}/logs`, { token, body: { log: { kind: 'honey', product: 'honey', quantity: 12, unit: 'kg', clientId: 'm9-honey' } } });
+  assert(honeyLog.status === 200, 'the honey harvest records (12 kg)');
+  const honeyAgain = await req('POST', `/farm/${farmId}/logs`, { token, body: { log: { kind: 'honey', product: 'honey', quantity: 12, unit: 'kg', clientId: 'm9-honey' } } });
+  assert(honeyAgain.body?.accepted?.[0]?.duplicate === true, 'a retried honey write is the SAME record (idempotent)');
+  const honeyShop = await req('GET', `/shop/${slug}`);
+  const honeyRow = (honeyShop.body?.availability || []).find((x) => x.product === 'honey');
+  assert(honeyRow && honeyRow.qty >= 12, `the beekeeper's shelf derives like the dairy's (${honeyRow ? honeyRow.qty : 'NO ROW'} kg on it)`);
+
+  const fishSellable = await req('POST', `/farm/${farmId}/sellables`, { token, body: { product: 'fish', label: 'Fish', unit: 'fish', price: 350, source: { kind: 'production', product: 'fish', windowDays: 60 } } });
+  assert(fishSellable.status === 200, 'the fish sellable is set');
+  const fishLog = await req('POST', `/farm/${farmId}/logs`, { token, body: { log: { kind: 'fish', product: 'fish', quantity: 40, unit: 'fish', clientId: 'm9-fish' } } });
+  assert(fishLog.status === 200, "the fish harvest records (40 fish — the whole-count is the protocol's own truth)");
+  const fishShop = await req('GET', `/shop/${slug}`);
+  const fishRow = (fishShop.body?.availability || []).find((x) => x.product === 'fish');
+  assert(fishRow && fishRow.qty >= 40, `the fish shelf derives from the count (${fishRow ? fishRow.qty : 'NO ROW'} on it)`);
+
+  const goatGroupId = goats.body?.group?._id;
+  const sale = await req('POST', `/farm/${farmId}/live-sale`, { token, body: { species: 'goats', count: 3, priceKES: 9000, subjectType: 'group', subjectId: goatGroupId, clientId: 'm9-sale' } });
+  assert(sale.status === 200, 'the live-sale event is written (a sale of whole live animals — its own event, never a harvest)');
+  const afterSale = await req('GET', `/farm/${farmId}/inventory`, { token });
+  const goatGroup = (afterSale.body?.animalGroups || []).find((g) => String(g._id) === String(goatGroupId));
+  assert(goatGroup && Number(goatGroup.count) === 5, `the herd decrements by the sale — 8 - 3 = ${goatGroup ? goatGroup.count : '?'}`);
+  const saleAgain = await req('POST', `/farm/${farmId}/live-sale`, { token, body: { species: 'goats', count: 3, priceKES: 9000, subjectType: 'group', subjectId: goatGroupId, clientId: 'm9-sale' } });
+  assert(saleAgain.body?.duplicate === true, 'a retried live-sale is the SAME event (a retried tap never sells twice)');
+  const tooMany = await req('POST', `/farm/${farmId}/live-sale`, { token, body: { species: 'goats', count: 99, priceKES: 1, subjectType: 'group', subjectId: goatGroupId, clientId: 'm9-toomany' } });
+  assert(tooMany.status === 400, `selling more than the herd holds is refused (${tooMany.status})`);
+
+  // ════════════════════════════════════════════════════════════════════════════
   // § AUTH (A4 — the fail-fast): production without AUTH_SECRET is CLOSED (503 on
   // every gated route), while the development grace still admits the dev
   // principal. Verified in a CHILD PROCESS (auth.js caches the secret at require
@@ -1162,9 +1198,10 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   {
     const { spawnSync } = require('child_process');
     const ROOT = process.cwd().replace(/\\/g, '/');
-    const child = (nodeEnv) => {
+    const child = (nodeEnv, withUri) => {
       const script = `
         process.env.NODE_ENV = '${nodeEnv}';
+        ${withUri ? "process.env.MONGO_DB_URI_FARMLINE = 'mongodb://127.0.0.1:27017/a4probe';" : ''}
         const config = require('${ROOT}/src/config.js');
         const orig = config.envVar;
         config.envVar = (name, fb) => (name === 'AUTH_SECRET' || name === 'MPESA_CALLBACK_SECRET') ? '' : orig(name, fb);
@@ -1174,9 +1211,18 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
         console.log('RESULT=' + res.code);
       `;
       const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env: { ...process.env } });
-      return (r.stdout || '').match(/RESULT=(\S+)/)?.[1] || ('stderr:' + String(r.stderr).slice(0, 80));
+      // The stderr of an uncaught throw leads with the STACK TRACE — the slice
+      // must reach the MESSAGE text for the refusal's shape to be assertable.
+      return (r.stdout || '').match(/RESULT=(\S+)/)?.[1] || ('stderr:' + String(r.stderr).slice(0, 400));
     };
-    assert(child('production') === '503', 'production without AUTH_SECRET is CLOSED (503 on a gated route)');
+    // THE NEW BOOT SHAPE (the founder's kill of the silent local fallback,
+    // 2026-10-13): production WITHOUT a database URI refuses to boot — an
+    // EARLIER and equally honest gate than the auth one below it.
+    const prodNoUri = child('production', false);
+    assert(prodNoUri.startsWith('stderr:') && prodNoUri.includes('refusing'),
+      'production without a database URI refuses to boot (the silent local fallback is dead)');
+    // ...and WITH the URI resolved, a hidden AUTH_SECRET still closes the gated routes:
+    assert(child('production', true) === '503', 'production without AUTH_SECRET is CLOSED (503 on a gated route)');
     assert(child('development') === 'next', 'development without AUTH_SECRET keeps the honest grace (the dev principal walks)');
   }
 

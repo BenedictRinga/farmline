@@ -133,8 +133,9 @@ const DEMO_SLUG = 'kimani-farms';
   // ── the herds ───────────────────────────────────────────────────────────────
   const herdDefs = [
     { species: 'cattle', label: 'the dairy cows', count: 5, productionKind: 'milk' },
-    { species: 'goats', label: 'the goats', count: 8, productionKind: 'none' },
+    { species: 'goats', label: 'the goats', count: 8, productionKind: '' },   // unset — never a stamped 'none' (the founder's correction)
     { species: 'layers', label: 'the laying hens', count: 200, productionKind: 'eggs' },
+    { species: 'bees', label: 'the hives', count: 4, productionKind: 'honey' },   // THE MEAT/HONEY/FISH SPEC: the apiary joins the walk
   ];
   const groups = {};
   for (const g of herdDefs) {
@@ -164,6 +165,11 @@ const DEMO_SLUG = 'kimani-farms';
   logs.push({ farmId: farm._id, kind: 'weight', at: day(-10), subjectType: 'animal', subjectId: browny._id, subjectLabel: 'Browny', product: 'weight', quantity: 420, unit: 'kg' });
   logs.push({ farmId: farm._id, kind: 'harvest', at: day(-3), subjectType: 'cropcycle', subjectId: null, subjectLabel: 'kale', product: 'kale', quantity: 40, unit: 'bunch' });
   logs.push({ farmId: farm._id, kind: 'purchase', at: day(-5), product: 'layers mash', quantity: 5, unit: 'bag', amountKES: 11500, counterparty: 'Unga House' });
+  // THE MEAT/HONEY/FISH SPEC (2026-10-13): the demo shows both new events —
+  // a honey harvest from the apiary, and ONE live-sale (a sale of whole live
+  // animals — a different event from a butchered yield, honestly labeled).
+  logs.push({ farmId: farm._id, kind: 'honey', at: day(-12), subjectType: 'group', subjectId: groups.bees._id, subjectLabel: 'the hives', product: 'honey', quantity: 14, unit: 'kg', note: 'capped honey only — the brood box kept its stores' });
+  logs.push({ farmId: farm._id, kind: 'live-sale', at: day(-55), subjectType: 'group', subjectId: groups.goats._id, subjectLabel: 'the goats', product: 'goats', quantity: 2, unit: 'head', amountKES: 9000, buyer: 'the gate buyer', note: 'sold live at the gate — two does' });
   await Log.insertMany(logs);
 
   // ── the live milk hold (the withdrawal machine, fed by the treatment) ───────
@@ -179,6 +185,11 @@ const DEMO_SLUG = 'kimani-farms';
     { farmId: farm._id, product: 'eggs', label: 'Eggs — a tray of 30', labelSw: 'Mayai — trey 30', unit: 'tray', unitSw: 'trey', price: 420, source: { kind: 'production', product: 'eggs', windowDays: 2 }, affects: ['eggs'], enabled: true },
     { farmId: farm._id, product: 'kale', label: 'Sukuma wiki', labelSw: 'Sukuma wiki', unit: 'bunch', unitSw: 'kichwa', price: 25, source: { kind: 'harvest', product: 'kale', windowDays: 3 }, enabled: true },
     { farmId: farm._id, product: 'avocado', label: 'Avocados — a crate', labelSw: 'Machungwa ya pecha — kasha', unit: 'crate', unitSw: 'kasha', price: 1500, source: { kind: 'none' }, enabled: true },
+    // THE MEAT/HONEY/FISH SPEC: the beekeeper's shelf works like the dairy's
+    // (production arithmetic), and the live-animal shelf derives from the
+    // animalForSale machinery — a row the walk can see.
+    { farmId: farm._id, product: 'honey', label: 'Honey — a jar of 500g', labelSw: 'Asali — kopo la 500g', unit: 'kg', unitSw: 'kg', price: 600, source: { kind: 'production', product: 'honey', windowDays: 120 }, enabled: true },
+    { farmId: farm._id, product: 'goats', label: 'A live goat', labelSw: 'Mbuzi hai', unit: 'head', unitSw: 'kichwa', price: 9000, source: { kind: 'animalForSale', product: 'goats' }, enabled: true },
   ]);
 
   // ── the buyers ──────────────────────────────────────────────────────────────

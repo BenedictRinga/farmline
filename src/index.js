@@ -1637,6 +1637,66 @@ api.post('/farm/:farmId/logs', auth.requireAuth('farmer'), auth.requireFarmScope
   return ok(res, { accepted, holds, availability });
 }));
 
+// ═══ THE LIVE-SALE (the founder's ruling baked in, 2026-10-13) ═══════════════
+// A sale of a whole live animal is NOT a harvest record — a butchered yield and
+// a LIVE sale are different events, honestly labeled, never conflated. The event
+// writes the ledger entry (kind 'live-sale', the species, the count, the agreed
+// price) and the SYSTEM decrements what the event says was sold — a tracked
+// animal leaves the herd by status, a group's count falls by the count sold.
+// The shelf needs no extra write: the animalForSale source counts status
+// 'forSale', and a sold animal is no longer forSale. Idempotent per clientId,
+// like every write on this farm.
+api.post('/farm/:farmId/live-sale', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const b = req.body || {};
+  const species = String(b.species || '').trim().toLowerCase();
+  const count = Math.floor(Number(b.count));
+  const price = Number(b.priceKES) || 0;
+  if (!species) return bad(res, 400, 'the species is required');
+  if (!Number.isFinite(count) || count < 1) return bad(res, 400, 'the count must be at least one');
+  if (price < 0) return bad(res, 400, 'the price must be a number');
+  const subjectType = b.subjectType === 'animal' ? 'animal' : 'group';
+  let subjectLabel = '';
+  if (subjectType === 'animal') {
+    const a = await Animal.findOne({ _id: b.subjectId, farmId: req.params.farmId });
+    if (!a) return bad(res, 404, 'animal not found');
+    if (a.species !== species) return bad(res, 400, 'the animal is not that species');
+    if (a.status === 'sold') return bad(res, 409, 'that animal is already sold');
+    subjectLabel = a.name || a.tag || species;
+  } else {
+    const g = await AnimalGroup.findOne({ _id: b.subjectId, farmId: req.params.farmId, archivedAt: null });
+    if (!g) return bad(res, 404, 'the group is not found');
+    if (g.species !== species) return bad(res, 400, 'the group is not that species');
+    if ((g.count || 0) < count) return bad(res, 400, `the group holds ${g.count} — you cannot sell ${count}`);
+    subjectLabel = g.label || species;
+  }
+  // Idempotency, the logs route's own pattern: a clientId already stored returns
+  // the SAME sale rather than a second one (a retried tap never sells twice).
+  if (b.clientId) {
+    const seen = await Log.findOne({ farmId: req.params.farmId, clientId: String(b.clientId) }).lean();
+    if (seen) return ok(res, { log: { id: seen._id }, duplicate: true });
+  }
+  // THE LEDGER EVENT FIRST — the sale happened; the money and the event are real
+  // even if a later step hiccups. Nothing here is a manual edit: the SYSTEM
+  // decrements what the event says was sold.
+  const log = await Log.create({
+    farmId: req.params.farmId,
+    kind: 'live-sale',
+    at: b.at ? new Date(b.at) : new Date(),
+    byMemberId: req.auth.mid || null,
+    subjectType, subjectId: b.subjectId || null, subjectLabel,
+    product: species, quantity: count, unit: 'head',
+    amountKES: price, buyer: b.buyer || '', note: b.note || '',
+    clientId: b.clientId || undefined,
+  });
+  if (subjectType === 'animal') {
+    await Animal.updateOne({ _id: b.subjectId }, { $set: { status: 'sold', salePrice: price } });
+  } else {
+    await AnimalGroup.updateOne({ _id: b.subjectId }, { $inc: { count: -count } });
+  }
+  const availability = await projection.buildAvailability(req.params.farmId);
+  return ok(res, { log: { id: log._id }, availability });
+}));
+
 // ──────────────────────────────────────────────────────────────────────────────
 // RECORDS — Layer 2: "What did I do, and what happened?"
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1738,7 +1798,10 @@ api.get('/farm/:farmId/sharp', auth.requireAuth('farmer'), auth.requireFarmScope
     const mine = logs.filter((l) => String(l.subjectId || '') === gid);
     // Groups may name their production 'milk' or 'dairy' (both spellings live in
     // the wild); the LOG kind they feed is 'milk' or 'eggs'. Map liberally.
-    const pk = ({ milk: 'milk', dairy: 'milk', eggs: 'eggs' })[g.productionKind || ''] || '';
+    // THE MEAT/HONEY/FISH SPEC: the bees' surface records 'honey', the pond's
+    // records 'fish' — each species' yield feeds its OWN log kind, exactly as
+    // the milk and the eggs always have.
+    const pk = ({ milk: 'milk', dairy: 'milk', eggs: 'eggs', honey: 'honey', fish: 'fish' })[g.productionKind || ''] || '';
     const prod = mine.filter((l) => pk && l.kind === pk);
     const sum = (rows) => round2(rows.reduce((s, l) => s + (Number(l.quantity) || 0), 0));
     const production = prod.length ? {

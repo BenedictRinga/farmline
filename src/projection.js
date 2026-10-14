@@ -90,7 +90,10 @@ async function deriveStock(farmId, s, { holds }) {
       // archivedAt: null — a REVERSED record stops counting the moment it is
       // archived (Layer 2 in-situ reversal). The shelf is a projection of the
       // records, so an undone record must take its milk off the shelf again.
-      { $match: { farmId: fid, product: s.source.product || s.product, kind: { $in: ['milk', 'eggs'] }, at: { $gte: since }, archivedAt: null } },
+      // THE MEAT/HONEY/FISH SPEC: honey and fish ride the SAME arithmetic —
+      // a beekeeper's shop front works like a dairy's; the sellable's own
+      // windowDays decides how far back the count reaches.
+      { $match: { farmId: fid, product: s.source.product || s.product, kind: { $in: ['milk', 'eggs', 'honey', 'fish'] }, at: { $gte: since }, archivedAt: null } },
       { $group: { _id: null, total: { $sum: '$quantity' } } },
     ]);
     const produced = rows[0]?.total || 0;

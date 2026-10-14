@@ -216,7 +216,7 @@ const animalGroupSchema = new Schema({
   species: { type: String, required: true },    // cattle | goats | sheep | layers | broilers | pigs | bees
   label: { type: String, default: '' },         // 'the dairy cows'
   count: { type: Number, default: 0 },
-  productionKind: { type: String, default: '' },// milk | eggs | none
+  productionKind: { type: String, default: '' },// milk | eggs | honey | fish | meat | '' — the log kind the group's yield feeds; '' = unset (never a stamped 'none')
   active: { type: Boolean, default: true },
   // THE MEETING (2026-10-13, the appraisal's fix A): the keep's idempotency key.
   clientId: { type: String, index: true },
@@ -279,7 +279,13 @@ const logSchema = new Schema({
   kind: {
     type: String, required: true, index: true,
     enum: ['milk', 'eggs', 'weight', 'treatment', 'spray', 'harvest', 'sale', 'purchase',
-           'feed', 'mortality', 'birth', 'service', 'water', 'note'],
+           'feed', 'mortality', 'birth', 'service', 'water', 'note',
+           'honey', 'fish', 'live-sale'],
+    // THE MEAT/HONEY/FISH SPEC (the founder's ruling baked in, 2026-10-13):
+    // 'honey' and 'fish' are the new recording surfaces (additive — every
+    // existing consumer untouched); 'live-sale' is the SALE of a whole live
+    // animal — a DIFFERENT event from a butchered yield, honestly labeled,
+    // never conflated. The shelf derives from all of it exactly as milk/eggs do.
   },
   at: { type: Date, default: Date.now, index: true },
   byMemberId: { type: Schema.Types.ObjectId, ref: 'Member', default: null },
