@@ -1492,6 +1492,206 @@ api.patch('/farm/:farmId/animals/:animalId', auth.requireAuth('farmer'), auth.re
   } });
 }));
 
+// ── THE ASSET STORIES — EVERYTHING OPENS (the founder's doctrine, 2026-10-15) ──
+// "Any user today will intuitively tap a pill or tab staring at them, and
+// discovering that it is a morgue creature, is an abysmal design failure." The
+// animal story (above) was the proof that one asset could open its whole truth;
+// these three bring the PLOTS, the CROPS and the GROUPS to the same standard:
+// identity, the schedule (done AND due, with costs), the trail (the entries —
+// every Log natively carries subjectType/subjectId/subjectLabel, so the filter
+// is a query, not a reconstruction), and the holds. The demo's seeded week
+// lights up with zero seed changes; every route is GET, so the demo's
+// read-only gate never meets them.
+//
+// THE SHARED GRAMMAR (mirrors the animal story above):
+//   upcoming = the work that still stands (due/carried, never the estimated
+//   questions — those stay on Shamba where the farmer answers them);
+//   past     = the history that already happened (done/skipped, with doneAt);
+//   trail    = the farmer's own entries, newest first;
+//   holds    = the withdrawal windows that are live right now.
+
+/** The intervention's name in the farmer's two languages, from the crop's own
+ *  protocol table (the same table the schedule was materialised from). */
+function cropLabelOf(cropName, intervention) {
+  const protos = protocols.PROTOCOLS[String(cropName || '').toLowerCase()] || [];
+  const hit = protos.find((x) => x.id === intervention);
+  return hit ? { sw: hit.name, en: hit.en } : { sw: intervention, en: intervention };
+}
+
+// ── THE PLOT'S STORY — the ground and everything growing on it ────────────────
+api.get('/farm/:farmId/plot/:plotId', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const p = await Plot.findOne({ _id: req.params.plotId, farmId: req.params.farmId, archivedAt: null }).lean();
+  if (!p) return bad(res, 404, 'plot not found');
+  const now = new Date();
+  const cycles = await CropCycle.find({ farmId: req.params.farmId, plotId: p._id, archivedAt: null }).lean();
+  const cropIds = cycles.map((c) => c._id);
+  const cropNames = [...new Set(cycles.map((c) => String(c.crop || '').toLowerCase()))];
+  const cropById = new Map(cycles.map((c) => [String(c._id), c]));
+
+  // The schedule that belongs to this ground: the plot's own events AND every
+  // crop growing on it — one story shows the whole plot's work.
+  const events = await ScheduledEvent.find({
+    farmId: req.params.farmId,
+    $or: [
+      { subjectType: 'plot', subjectId: p._id },
+      { subjectType: 'cropcycle', subjectId: { $in: cropIds } },
+    ],
+  }).sort({ dueOn: 1 }).limit(80).lean();
+  const shape = (e) => ({
+    id: String(e._id), intervention: e.intervention,
+    label: cropLabelOf((cropById.get(String(e.subjectId)) || {}).crop, e.intervention),
+    dueOn: e.dueOn, inDays: Math.round((new Date(e.dueOn) - now) / 86400000),
+    overdue: new Date(e.dueOn) < now, status: e.status, baseline: !!e.baseline,
+    costEstimate: e.costEstimate || 0,
+    subjectLabel: (cropById.get(String(e.subjectId)) || {}).crop || e.subjectLabel || '',
+    cycleId: e.subjectType === 'cropcycle' ? String(e.subjectId) : null,
+  });
+  const upcoming = events.filter((e) => ['due', 'carried'].includes(e.status) && !e.estimated).map(shape);
+  const past = events.filter((e) => ['done', 'skipped'].includes(e.status)).map(shape);
+
+  // THE TRAIL — the plot's own rows plus every log its crops earned. The harvest
+  // rows the capture buttons wrote carry subjectId null and name the product, so
+  // the crop's own names join them honestly (and only them).
+  const trail = await Log.find({
+    farmId: req.params.farmId, archivedAt: null,
+    $or: [
+      { subjectId: p._id },
+      { subjectType: 'cropcycle', subjectId: { $in: cropIds } },
+      { subjectType: 'cropcycle', subjectId: null, product: { $in: cropNames } },
+    ],
+  }).sort({ at: -1 }).limit(40).lean();
+
+  const holds = await Hold.find({
+    farmId: req.params.farmId, active: true, until: { $gt: now },
+    $or: [{ subjectId: p._id }, { subjectId: { $in: cropIds } }],
+  }).select('product affects until days').lean();
+
+  return ok(res, {
+    kind: 'plot',
+    plot: { _id: String(p._id), name: p.name, acres: p.acres, soil: p.soil, water: p.water, notes: p.notes || '' },
+    crops: cycles.map((c) => ({
+      _id: String(c._id), crop: c.crop, variety: c.variety, status: c.status,
+      plantedOn: c.plantedOn, plantedOnEstimated: !!c.plantedOnEstimated,
+      daysGrowing: c.plantedOn ? Math.max(0, Math.round((now - new Date(c.plantedOn)) / 86400000)) : null,
+      harvested: c.yield && c.yield.quantity ? { quantity: c.yield.quantity, unit: c.yield.unit, on: c.yield.harvestedOn } : null,
+    })),
+    upcoming, past,
+    upcomingKes: upcoming.reduce((s, e) => s + (e.costEstimate || 0), 0),
+    trail: trail.map((r) => ({ id: String(r._id), at: r.at, kind: r.kind, product: r.product, quantity: r.quantity || 0, unit: r.unit || '', note: r.note || '', subjectLabel: r.subjectLabel || '' })),
+    holds: holds.map((h) => ({ product: h.product, affects: h.affects, days: h.days, until: h.until })),
+  });
+}));
+
+// ── THE CROP'S STORY — one cycle's whole life, seed to shelf ──────────────────
+api.get('/farm/:farmId/crop/:cycleId', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const c = await CropCycle.findOne({ _id: req.params.cycleId, farmId: req.params.farmId, archivedAt: null }).lean();
+  if (!c) return bad(res, 404, 'crop not found');
+  const now = new Date();
+  const plot = c.plotId
+    ? await Plot.findOne({ _id: c.plotId, farmId: req.params.farmId, archivedAt: null }).select('name acres').lean()
+    : null;
+
+  const events = await ScheduledEvent.find({
+    farmId: req.params.farmId, subjectType: 'cropcycle', subjectId: c._id,
+  }).sort({ dueOn: 1 }).limit(80).lean();
+  const shape = (e) => ({
+    id: String(e._id), intervention: e.intervention,
+    label: cropLabelOf(c.crop, e.intervention),
+    dueOn: e.dueOn, inDays: Math.round((new Date(e.dueOn) - now) / 86400000),
+    overdue: new Date(e.dueOn) < now, status: e.status, baseline: !!e.baseline,
+    costEstimate: e.costEstimate || 0, doneAt: e.doneAt || null, productUsed: e.productUsed || '',
+  });
+  const upcoming = events.filter((e) => ['due', 'carried'].includes(e.status) && !e.estimated).map(shape);
+  const past = events.filter((e) => ['done', 'skipped'].includes(e.status)).map(shape);
+
+  // THE TRAIL — the cycle's own rows, plus the harvest rows the capture path
+  // wrote against the crop's NAME (subjectId null there — the honest join is
+  // the product name, and only this crop's name).
+  const cropKey = String(c.crop || '').toLowerCase();
+  const trail = await Log.find({
+    farmId: req.params.farmId, archivedAt: null,
+    $or: [
+      { subjectType: 'cropcycle', subjectId: c._id },
+      { subjectType: 'cropcycle', subjectId: null, product: cropKey },
+    ],
+  }).sort({ at: -1 }).limit(40).lean();
+
+  const holds = await Hold.find({
+    farmId: req.params.farmId, subjectId: c._id, active: true, until: { $gt: now },
+  }).select('product affects until days').lean();
+
+  return ok(res, {
+    kind: 'crop',
+    crop: {
+      _id: String(c._id), crop: c.crop, variety: c.variety, acres: c.acres, season: c.season,
+      status: c.status, plantedOn: c.plantedOn, plantedOnEstimated: !!c.plantedOnEstimated,
+      calendarFrom: c.cycleStartOn || null,
+      daysGrowing: c.plantedOn ? Math.max(0, Math.round((now - new Date(c.plantedOn)) / 86400000)) : null,
+      expectedHarvest: c.expectedHarvest || null,
+      harvested: c.yield && c.yield.quantity ? { quantity: c.yield.quantity, unit: c.yield.unit, on: c.yield.harvestedOn } : null,
+      fodderFor: c.fodderFor || '', intercropWith: c.intercropWith || '',
+    },
+    plot: plot ? { _id: String(plot._id), name: plot.name, acres: plot.acres } : null,
+    schedule: { upcoming, past },
+    upcomingKes: upcoming.reduce((s, e) => s + (e.costEstimate || 0), 0),
+    trail: trail.map((r) => ({ id: String(r._id), at: r.at, kind: r.kind, product: r.product, quantity: r.quantity || 0, unit: r.unit || '', note: r.note || '', subjectLabel: r.subjectLabel || '' })),
+    holds: holds.map((h) => ({ product: h.product, affects: h.affects, days: h.days, until: h.until })),
+  });
+}));
+
+// ── THE GROUP'S STORY — the herd as the farmer manages it ─────────────────────
+api.get('/farm/:farmId/group/:groupId', auth.requireAuth('farmer'), auth.requireFarmScope, wrap(async (req, res) => {
+  const g = await AnimalGroup.findOne({ _id: req.params.groupId, farmId: req.params.farmId, archivedAt: null }).lean();
+  if (!g) return bad(res, 404, 'group not found');
+  const now = new Date();
+  const animals = await Animal.find({ farmId: req.params.farmId, groupId: g._id }).lean();
+  const animalIds = animals.map((a) => a._id);
+
+  const protos = protocols.forSpecies(g.species);
+  const labelOf = (id) => {
+    const p = protos.find((x) => x.id === id);
+    return p ? { sw: p.name, en: p.en } : { sw: id, en: id };
+  };
+  const events = await ScheduledEvent.find({
+    farmId: req.params.farmId, subjectType: 'group', subjectId: g._id,
+  }).sort({ dueOn: 1 }).limit(80).lean();
+  const shape = (e) => ({
+    id: String(e._id), intervention: e.intervention, label: labelOf(e.intervention),
+    dueOn: e.dueOn, inDays: Math.round((new Date(e.dueOn) - now) / 86400000),
+    overdue: new Date(e.dueOn) < now, status: e.status, baseline: !!e.baseline,
+    costEstimate: e.costEstimate || 0, doneAt: e.doneAt || null, productUsed: e.productUsed || '',
+  });
+  const upcoming = events.filter((e) => ['due', 'carried'].includes(e.status) && !e.estimated).map(shape);
+  const past = events.filter((e) => ['done', 'skipped'].includes(e.status)).map(shape);
+
+  // THE TRAIL — the herd's whole truth: the group's own rows (milk, eggs,
+  // treatments) AND its members' individual rows (weights, services). The farmer
+  // manages the herd; the story shows the herd.
+  const trail = await Log.find({
+    farmId: req.params.farmId, archivedAt: null,
+    subjectId: { $in: [g._id, ...animalIds] },
+  }).sort({ at: -1 }).limit(40).lean();
+
+  const holds = await Hold.find({
+    farmId: req.params.farmId, active: true, until: { $gt: now },
+    subjectId: { $in: [g._id, ...animalIds] },
+  }).select('product affects until days').lean();
+
+  return ok(res, {
+    kind: 'group',
+    group: { _id: String(g._id), label: g.label || g.species, species: g.species, count: g.count, productionKind: g.productionKind || '' },
+    animals: animals.map((a) => ({
+      _id: String(a._id), name: a.name, tag: a.tag, sex: a.sex, bornOn: a.bornOn,
+      weightKg: a.weightKg, status: a.status, salePrice: a.salePrice || null,
+      ageMonths: a.bornOn ? Math.floor((now - new Date(a.bornOn)) / (86400000 * 30.44)) : null,
+    })),
+    schedule: { upcoming, past },
+    upcomingKes: upcoming.reduce((s, e) => s + (e.costEstimate || 0), 0),
+    trail: trail.map((r) => ({ id: String(r._id), at: r.at, kind: r.kind, product: r.product, quantity: r.quantity || 0, unit: r.unit || '', note: r.note || '', subjectLabel: r.subjectLabel || '' })),
+    holds: holds.map((h) => ({ product: h.product, affects: h.affects, days: h.days, until: h.until })),
+  });
+}));
+
 // ──────────────────────────────────────────────────────────────────────────────
 // REVERSAL — correct it, undo it, put it back. One pattern, all three kinds.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1779,6 +1979,11 @@ api.get('/farm/:farmId/records', auth.requireAuth('farmer'), auth.requireFarmSco
       quantity: r.quantity,
       unit: r.unit,
       subjectLabel: r.subjectLabel,
+      // THE STORY LINK (the founder's Everything-Opens doctrine, 2026-10-15):
+      // the record's subject is now NAVIGABLE — the app renders the label as a
+      // chip that opens that asset's story. Additive; old clients never read it.
+      subjectType: r.subjectType || '',
+      subjectId: r.subjectId ? String(r.subjectId) : null,
       note: r.note,
       amountKES: r.amountKES || 0,
       fromSchedule: !!r.scheduledEventId,
