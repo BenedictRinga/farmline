@@ -15,6 +15,19 @@ const auth = require('../src/auth');
 const schedule = require('../src/schedule');
 const protocols = require('../src/protocols');
 
+// THE CONDITIONAL SEED (2026-10-15, the boot-latency lesson): the replace-whole
+// storm (13 deleteMany runs + the full insert pass) ran at EVERY boot — and
+// every restart (a watch heal, a deploy) re-ran it, spiking /health latency
+// exactly when the prober is most sensitive (the 12:41 timeout alarm). Now the
+// seed SKIPS when the demo is current:
+//   · the demo farm exists AND
+//   · farm.seedRev matches SEED_REV (the fiction is unchanged), AND
+//   · farm.seedAt is younger than SEED_MAX_AGE_MS (the living week is fresh).
+// Bump SEED_REV whenever the fictional content below changes — the next boot
+// then reseeds, exactly as the old always-seed did.
+const SEED_REV = '2026-10-15-A'; // bump when the seed content changes
+const SEED_MAX_AGE_MS = 12 * 60 * 60 * 1000; // a demo older than 12h refreshes on the next boot
+
 const day = (n) => new Date(Date.now() + n * 86400000);
 const DEMO_SLUG = 'kimani-farms';
 
@@ -25,6 +38,12 @@ const DEMO_SLUG = 'kimani-farms';
 
   // ── replace any existing demo ───────────────────────────────────────────────
   const old = await Farm.findOne({ slug: DEMO_SLUG }).lean();
+  if (old && old.seedRev === SEED_REV && old.seedAt && (Date.now() - new Date(old.seedAt).getTime()) < SEED_MAX_AGE_MS) {
+    const ageH = Math.round((Date.now() - new Date(old.seedAt).getTime()) / 3600000);
+    console.log(`  [demo-seed] current — revision ${SEED_REV}, seeded ${ageH}h ago: SKIP (the boot storm is gone; the demo data stands)`);
+    await mongoose.disconnect();
+    process.exit(0);
+  }
   if (old) {
     const fid = old._id;
     await Promise.all([
@@ -74,6 +93,8 @@ const DEMO_SLUG = 'kimani-farms';
     trust: { withdrawalAdherence: 1, vaccinationsCurrent: true, responseRate: 0.95, fulfilmentRate: 0.97, ordersFulfilled: 34 },
     confidence: { grade: 'high', daysOfHistory: 64, categorisedPct: 0.98, lastLoggedAt: day(-1) },
     isDemo: true,
+    seedRev: SEED_REV, // THE CONDITIONAL SEED's stamp — boots skip while it matches and is fresh
+    seedAt: new Date(),
     photo,
   });
   console.log('  farm:', farm.name, farm._id);

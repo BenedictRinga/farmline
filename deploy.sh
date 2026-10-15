@@ -35,6 +35,19 @@ BRANCH="${FARMLINE_BRANCH:-main}"
 echo "── farmline deploy ─────────────────────────────────────────────"
 cd "$DEPLOY_DIR" || { echo "FATAL: $DEPLOY_DIR not found. Clone the repo there first."; exit 1; }
 
+# ── THE DEPLOY WINDOW (2026-10-15, the cutover-alarm wobble) ──────────────────
+# The marker tells the two watchers — the Zyppar CommandCenter prober and the
+# farmline every-minute watch — that a DEPLOY owns this window: the prober
+# quiets its DOWN alarm into a diag, and the watch skips its heal (restarting
+# a mid-deploy tree is the quiet-tree lesson of 2026-10-02). The EXIT trap
+# removes the marker on EVERY path — success, failure, abort — so a deploy
+# that ends wrongly hands the alarm back: the next failing probe fires as
+# normal. The watchers also age-bound the marker (10 min), so even a SIGKILL
+# cannot mask a real outage for long.
+DEPLOY_MARKER="/tmp/farmline-deploying"
+touch "$DEPLOY_MARKER"
+trap 'rm -f "$DEPLOY_MARKER"' EXIT
+
 # ── THE .ENV NEVER-OVERWRITE GUARANTEE ────────────────────────────────────────
 # The founder hand-edits .env on the droplet (AUTH_SECRET, FARMLINE_ADMIN_KEY,
 # MPESA_*). `git reset --hard` below must never be able to destroy an edit.

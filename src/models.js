@@ -86,6 +86,14 @@ const farmSchema = new Schema({
   // and can be re-seeded whole at any time).
   isDemo: { type: Boolean, default: false, index: true },
 
+  // THE CONDITIONAL SEED's stamp (2026-10-15, the boot-latency lesson): the
+  // demo seed skips boots while this revision matches AND seedAt is fresh —
+  // restarts (watch heals, deploys) no longer re-storm mongod with the
+  // whole-farm replacement. Bump SEED_REV in scripts/seed-demo-farm.cjs when
+  // the fiction changes; the next boot reseeds.
+  seedRev: { type: String, default: '' },
+  seedAt: { type: Date },
+
   // ── the finish line (spec v1 §3) — required income is a 12-month PROFILE,
   //    not a flat number: school fees and harvests are lumpy. ──
   requiredIncome: {

@@ -47,6 +47,21 @@ healthy=0
 prev="down"
 [ -f "$STATE_FILE" ] && prev="$(cat "$STATE_FILE" 2>/dev/null || echo down)"
 
+# ── THE DEPLOY WINDOW (2026-10-15, the cutover-alarm wobble) ─────────────────
+# A fresh /tmp/farmline-deploying marker means a DEPLOY owns this minute: the
+# heal is SKIPPED (restarting a mid-deploy tree is the quiet-tree lesson of
+# 2026-10-02) and no webhook speaks — the cut-over window is policed by the
+# deploy's own health gate, not by this watch. The marker is AGE-BOUND
+# (10 minutes): a crashed deploy that left a stale marker cannot mask a real
+# outage; once it ages out, the normal heal resumes.
+deploy_window() {
+  [ -f /tmp/farmline-deploying ] || return 1
+  local mt now
+  mt="$(stat -c %Y /tmp/farmline-deploying 2>/dev/null || echo 0)"
+  now="$(date +%s)"
+  [ $(( now - mt )) -lt 600 ]
+}
+
 notify() {
   # $1 = the message. Logs always; the webhook only when armed.
   echo "$LOG_PREFIX $1"
@@ -65,6 +80,15 @@ if [ "$healthy" = "1" ]; then
     notify "API is back UP (code $code).${prev:+ was $prev}"
   fi
   echo ok > "$STATE_FILE"
+  exit 0
+fi
+
+if deploy_window; then
+  # THE DEPLOY WINDOW: log only — the webhook stays silent inside the window
+  # (a per-minute webhook for the whole deploy is the noise this window exists
+  # to cure). The state file is untouched, so the next healthy cycle reports
+  # "back UP" normally, and a stale marker ages out into the normal heal.
+  echo "$LOG_PREFIX DOWN (code $code) but a deploy is in flight — the heal is skipped; the cut-over owns this window."
   exit 0
 fi
 
