@@ -422,6 +422,20 @@ function fl_recordVisit(req, kind) {
     const t = _visitThrottle.get(key);
     if (!t || now - t.windowStart > 60000) _visitThrottle.set(key, { count: 1, windowStart: now });
     else if (++t.count > 30) return; // the excess is dropped - a flood is not data
+    // ── THE DEVICE ORIGIN (the magister, 2026-10-15: "Our Farmline logs in
+    // Zyppar CommandCenter are not catching country or region of device
+    // origin, unlike in Zyppar") — Zyppar's country rides the IDENTITY (the
+    // location gate / the mint), a thing a farmline visitor never has. The
+    // honest equivalent: what the DEVICE ITSELF declares. The app's beacon
+    // carries `locale` (navigator.language, e.g. 'en-KE') and `tz` (the IANA
+    // zone, e.g. 'Africa/Nairobi'). The locale's region subtag is the
+    // COUNTRY HINT; the timezone is stored raw for the region read. Both are
+    // device facts, not self-identified claims; absence is stored as ''.
+    const locale = String(req.body?.locale || '').slice(0, 35);
+    const tz = String(req.body?.tz || '').slice(0, 40);
+    let countryHint = '';
+    const sub = locale.match(/-([A-Za-z]{2})\s*$/);
+    if (sub) countryHint = sub[1].toUpperCase();
     const c = conn.db.collection('visits');
     c.insertOne({
       at: new Date(), kind,
@@ -433,6 +447,8 @@ function fl_recordVisit(req, kind) {
       ref: String(req.headers['referer'] || '').slice(0, 240),
       // '' when untagged - an absent tag is honest, a guessed one is not.
       src: cleanSrc(req.body?.src),
+      // THE DEVICE ORIGIN fields (absent on old clients — never fabricated).
+      locale, tz, countryHint,
     }).catch(() => { /* the ledger never blocks an auth flow */ });
   } catch { /* never blocks */ }
 }
