@@ -119,13 +119,16 @@ async function send({ deviceId, feedbackId, text, photo = '', clientId = '' }) {
   return { ok: true };
 }
 
-/** READ — the sender's own read: the thread plus their receipt stamp. */
+/** READ — the sender's own read: the thread plus their receipt stamp. The
+ *  thread's hqReadAt rides along (Task 13, 2026-10-15): the visitor's sheet
+ *  marks their own lines read when HQ has read the thread — the receipt
+ *  LoopKeeper's shape always promised the sender. */
 async function read({ deviceId, feedbackId }) {
   const thread = await threadFor(deviceId, feedbackId);
   if (!thread) return null;
   await FeedbackChat.updateOne({ _id: thread._id }, { $set: { senderReadAt: new Date() } });
   const msgs = await threadMessages(thread._id);
-  return { feedbackId: thread.feedbackId, msgs, senderReadAt: new Date() };
+  return { feedbackId: thread.feedbackId, msgs, senderReadAt: new Date(), hqReadAt: thread.hqReadAt || null };
 }
 
 /**
