@@ -257,24 +257,51 @@ app.post('/api/farmline/updates/announce', (req, res) => {
 // proxies and which can never be confused with a neighbour's route.
 // `/health` is still served for DIRECT localhost use (deploy.sh checks it before
 // nginx is in the picture) — but verify-live.cjs checks THIS one.
-const healthPayload = () => ({
-  ok: true,
-  db: conn.readyState === 1 ? 'connected' : 'connecting',
-  dbName: config.dbName,
-  // A4: authArmed is NO LONGER published here — /health is public, and a server
-  // with no secret must not advertise its own disarmament to the internet. The
-  // armed state lives in the boot log and in /admin/farms (gated).
-  //
-  // THE MONEY FIELDS ARE GONE WITH THE RAIL (2026-10-11): `moneyMode` and
-  // `mpesaConfigured` described a rail between a buyer and a farmer. There is no
-  // such rail. What is left that a monitor actually wants is whether the ZU door
-  // is OPEN — i.e. whether the operator has published collection details, since
-  // without them nobody can credit an account.
-  zuOpen: zu.collectionOpen(),
-  basePath: config.basePath,
-  build: Number(require('../package.json').build) || 0,
-  at: new Date().toISOString(),
-});
+const healthPayload = () => {
+  // THE TWO CLOCKS, NAMED (2026-10-17, the founder's re-check of the "stale
+  // bundle" side-note — the note was WRONG, and the confusion was real):
+  //   · `build`/`serverBuild` = THIS SERVER's own package.json counter (the
+  //     server deploy cadence — the monitor's long-standing field);
+  //   · `appBuild` = THE SERVED-BUNDLE CLOCK (/version's resolution, lifted
+  //     from the frozen updates.js: env override → /var/www/farmline/build.json
+  //     → the sibling checkout → the server's own counter) — the deployed APP's
+  //     build, which legitimately runs AHEAD of the server (the app deploys
+  //     per push; the server per founder build). They are two different
+  //     counters, both correct — never a staleness symptom.
+  const candidates = [];
+  if (process.env.FARMLINE_SERVED_BUNDLE) candidates.push(path.join(process.env.FARMLINE_SERVED_BUNDLE, 'build.json'));
+  candidates.push('/var/www/farmline/build.json');
+  candidates.push(path.resolve(process.cwd(), '..', 'farmline-app', 'www', 'build.json'));
+  let appBuild = 0;
+  for (const p of candidates) {
+    try {
+      const stamp = JSON.parse(require('fs').readFileSync(p, 'utf8'));
+      const n = Number(stamp.build);
+      if (Number.isFinite(n) && n > 0) { appBuild = n; break; }
+    } catch { /* the next candidate */ }
+  }
+  const serverBuild = Number(require('../package.json').build) || 0;
+  return {
+    ok: true,
+    db: conn.readyState === 1 ? 'connected' : 'connecting',
+    dbName: config.dbName,
+    // A4: authArmed is NO LONGER published here — /health is public, and a server
+    // with no secret must not advertise its own disarmament to the internet. The
+    // armed state lives in the boot log and in /admin/farms (gated).
+    //
+    // THE MONEY FIELDS ARE GONE WITH THE RAIL (2026-10-11): `moneyMode` and
+    // `mpesaConfigured` described a rail between a buyer and a farmer. There is no
+    // such rail. What is left that a monitor actually wants is whether the ZU door
+    // is OPEN — i.e. whether the operator has published collection details, since
+    // without them nobody can credit an account.
+    zuOpen: zu.collectionOpen(),
+    basePath: config.basePath,
+    build: serverBuild,
+    serverBuild,
+    appBuild: appBuild || serverBuild,
+    at: new Date().toISOString(),
+  };
+};
 // THE DEMO VISION SPEND rides the health answer (Task 3): the existing monitor
 // (the watch, the zyppar Farmline Wire prober) reads it for free. The counter
 // NEVER blocks the watch — a DB hiccup answers without the field.
