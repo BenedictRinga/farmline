@@ -52,7 +52,7 @@ const feedback = require('./feedback');
 const metacounter = require('./metacounter');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
-  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating, ZuClaim,
+  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating, ZuClaim, VisitorIdentity,
 } = require('./models');
 
 const app = express();
@@ -338,7 +338,11 @@ api.get('/health', async (_req, res) => res.json(await healthPayloadAsync()));
 // AUTH — two principals
 // ──────────────────────────────────────────────────────────────────────────────
 api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
-  fl_recordVisit(req, 'register');
+  // THE CONVERSION JOIN (the Zyppar model's prize): the SAME visitor identity
+  // that walked the demo and opened the Meeting flips isGuest:false and gains
+  // the member — the ledger's history becomes the account's history.
+  const visitor = await resolveVisitor(req, res);
+  fl_recordVisit(req, 'register', visitor && visitor._id);
   const { phone, pin, name = '', farmName = '', area = '' } = req.body || {};
   if (!phone || !pin) return bad(res, 400, 'phone and pin are required');
   if (String(pin).length < 4) return bad(res, 400, 'pin must be at least 4 digits');
@@ -359,6 +363,9 @@ api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
   });
   const { salt, hash } = auth.hashPin(pin);
   const member = await Member.create({ farmId: farm._id, phone: String(phone), name, role: 'owner', pinSalt: salt, pinHash: hash });
+  if (visitor) {
+    try { await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { isGuest: false, memberId: member._id } }); } catch { /* the join never blocks the registration */ }
+  }
 
   return ok(res, {
     token: auth.mintFarmerToken(farm._id, member._id, 'owner'),
@@ -369,10 +376,16 @@ api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
 }));
 
 api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
-  fl_recordVisit(req, 'login');
+  const visitor = await resolveVisitor(req, res);
+  fl_recordVisit(req, 'login', visitor && visitor._id);
   const { phone, pin } = req.body || {};
   const member = await Member.findOne({ phone: String(phone || ''), active: true });
   if (!member || !auth.checkPin(pin, member.pinSalt, member.pinHash)) return bad(res, 401, 'wrong number or PIN');
+  // THE CONVERSION/RETURN BIND (idempotent): the farmer's device identity joins
+  // the account on every return — the ledger reads one person's story.
+  if (visitor) {
+    try { await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { isGuest: false, memberId: member._id } }); } catch { /* the join never blocks the sign-in */ }
+  }
   const farm = await Farm.findById(member.farmId);
   return ok(res, {
     token: auth.mintFarmerToken(farm._id, member._id, member.role),
@@ -443,7 +456,80 @@ const CRAWLER_UA = /facebookexternalhit|WhatsApp|TelegramBot|Twitterbot|LinkedIn
 // a runaway loop both look like that). The excess rows are DROPPED, never queued.
 const _visitThrottle = new Map(); // key ip|kind -> {count, windowStart}
 
-function fl_recordVisit(req, kind) {
+// ── THE VISITOR IDENTITY (2026-10-20, the Zyppar guest model, farmline-shaped) ─
+// A VISITOR IS A USER: one identity class, minted server-side, durable. The
+// resolution order is Zyppar's own: the body's deviceId → the farmline_device
+// cookie → (at the mint door only) mint fresh. The deviceId is THE
+// device↔identity binding — multiple devices clash over an ip address (CGNAT
+// puts thousands behind one address), never over a deviceId. The ip stays in
+// every ledger row as the SECONDARY signal (geo, abuse forensics, crawlers),
+// masked at display. Two anchors cover each other's deaths: the client-stored
+// deviceId survives cookie clearing; the HttpOnly cookie (server-set cookies
+// are EXEMPT from WebKit ITP's script-storage purge) survives storage clearing.
+
+function readCookie(req, name) {
+  // The hand-rolled parser — no new dependency (the house style). One header,
+  // semicolon-separated name=value pairs; the value may be quoted.
+  const raw = String(req.headers.cookie || '');
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim().replace(/^"(.*)"$/, '$1'));
+  }
+  return '';
+}
+
+const DEVICE_COOKIE = 'farmline_device';
+
+/** THE RESOLUTION: body deviceId → the cookie → null (an anonymous row keeps
+ *  its honest ip-only shape — never a fabricated identity). When a device
+ *  anchor EXISTS, the identity is resolved-or-minted (idempotent: same device,
+ *  same identity, forever) and the cookie is re-anchored on EVERY touch. The
+ *  adoption (the migration): a FeedbackChat bound to this deviceId lends its
+ *  FL- id to the identity — every existing install joins its silo at first
+ *  touch, with zero backfill. */
+async function resolveVisitor(req, res) {
+  try {
+    const deviceId = String(req.body?.deviceId || '').trim().slice(0, 64) || readCookie(req, DEVICE_COOKIE);
+    if (!deviceId) return null;
+    let identity = await VisitorIdentity.findOne({ deviceId });
+    let created = false;
+    if (!identity) {
+      try {
+        identity = await VisitorIdentity.create({ deviceId });
+        created = true;
+      } catch (e) {
+        // a deviceId race re-reads the winner (the mint's own pattern)
+        identity = await VisitorIdentity.findOne({ deviceId });
+        if (!identity) return null;
+      }
+    }
+    if (created) {
+      // THE MIGRATION (the founder: "provide for migration of current users"):
+      // the feedback silo's thread bound to this deviceId lends its FL- id.
+      const fbId = await feedback.feedbackIdForDevice(deviceId);
+      if (fbId) {
+        await VisitorIdentity.updateOne({ _id: identity._id }, { $set: { feedbackId: fbId } }).catch(() => null);
+        identity.feedbackId = fbId;
+      }
+    }
+    // The locale facts ride the body when present (the device's own words).
+    const locale = String(req.body?.locale || '').slice(0, 35);
+    const tz = String(req.body?.tz || '').slice(0, 40);
+    const patch = { lastSeenAt: new Date() };
+    if (locale && locale !== identity.locale) patch.locale = locale;
+    if (tz && tz !== identity.tz) patch.tz = tz;
+    if (req.body?.src) patch.lastSrc = cleanSrc(req.body?.src);
+    await VisitorIdentity.updateOne({ _id: identity._id }, { $set: patch }).catch(() => null);
+    // (Re)anchor the device durably on EVERY touch — HttpOnly, first-party,
+    // server-set, ten years: the anchor that outlives the storage purges.
+    if (res && typeof res.cookie === 'function') {
+      res.cookie(DEVICE_COOKIE, deviceId, { httpOnly: true, sameSite: 'lax', secure: true, maxAge: 10 * 365 * 24 * 3600 * 1000, path: '/' });
+    }
+    return identity;
+  } catch { return null; }   // identity resolution never blocks the door it serves
+}
+function fl_recordVisit(req, kind, identityId) {
   try {
     // THE HONEST MISSING-IP [4]: a spoofed/absent address records unknown,
     // never a fabricated value.
@@ -472,8 +558,10 @@ function fl_recordVisit(req, kind) {
     const sub = locale.match(/-([A-Za-z]{2})\s*$/);
     if (sub) countryHint = sub[1].toUpperCase();
     const c = conn.db.collection('visits');
+    // THE VISITOR ID on the row (the person-key; ip stays the secondary signal).
     c.insertOne({
       at: new Date(), kind,
+      identityId: identityId || null,
       ip,
       // [2] the crawler marks - real traffic, honestly labeled
       isCrawler,
@@ -571,20 +659,52 @@ api.post('/meeting/event', shellBeaconRateLimit, wrap(async (req, res) => {
   const kind = String(req.body?.event || '').trim().toLowerCase();
   if (!MEETING_KINDS.includes(kind)) return bad(res, 400, 'unknown meeting event');
   // The SAME recorder the auth doors use: at / kind / ip / ua / ref / src. Never blocks.
-  fl_recordVisit(req, kind);
+  const visitor = await resolveVisitor(req, res);
+  fl_recordVisit(req, kind, visitor && visitor._id);
   return ok(res, { noted: kind });
 }));
 
+// ── THE MINT DOOR (the Zyppar guest mint, farmline-shaped) ───────────────────
+// The app calls this ONCE per boot (its identity service keeps the answer in
+// durable storage). Resolution: body deviceId → the farmline_device cookie →
+// mint fresh. THE ADOPTION IS THE MIGRATION: an existing install's stored
+// deviceId mints ITS identity, and the feedback silo's FL- id joins it — no
+// backfill, no break, the rating history follows the person into the account
+// they may one day register. The mint is idempotent: same device, same id.
+api.post('/identity/mint', shellBeaconRateLimit, wrap(async (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').trim().slice(0, 64) || readCookie(req, DEVICE_COOKIE)
+    || (await import('crypto')).randomUUID();   // the mint door is the ONLY fresh-mint site
+  const identity = await resolveVisitor({ ...req, body: { ...req.body, deviceId } }, res);
+  if (!identity) return bad(res, 500, 'the identity could not be minted');
+  // The client's stored feedback pair binds here too (belt to the adoption's braces).
+  const fbFrom = String(req.body?.feedbackId || '').toUpperCase().slice(0, 16);
+  if (fbFrom && !identity.feedbackId) {
+    const okPair = await feedback.threadFor(deviceId, fbFrom).catch(() => null);
+    if (okPair) {
+      await VisitorIdentity.updateOne({ _id: identity._id }, { $set: { feedbackId: fbFrom } }).catch(() => null);
+      identity.feedbackId = fbFrom;
+    }
+  }
+  fl_recordVisit(req, 'identity-mint', identity._id);
+  return ok(res, {
+    id: identity._id, deviceId,
+    isGuest: identity.isGuest !== false,
+    feedbackId: identity.feedbackId || '',
+    memberId: identity.memberId || null,
+  });
+}));
 api.post('/visit', shellBeaconRateLimit, wrap(async (req, res) => {
   // ONE KIND, hard-coded on purpose: this door answers one question — did a shell
   // load? — and a caller-supplied `kind` would let anyone write rows that look like
   // registers or customer logins in the founder's own analytics.
-  fl_recordVisit(req, 'shell');
+  const visitor = await resolveVisitor(req, res);
+  fl_recordVisit(req, 'shell', visitor && visitor._id);
   return ok(res, { noted: true });
 }));
 
 api.post('/auth/demo', auth.mintRateLimit, wrap(async (req, res) => {
-  fl_recordVisit(req, 'demo');
+  const visitor = await resolveVisitor(req, res);
+  fl_recordVisit(req, 'demo', visitor && visitor._id);
   const farm = await Farm.findOne({ isDemo: true });
   if (!farm) return bad(res, 404, 'the demo farm is not seeded yet');
   const member = await Member.findOne({ farmId: farm._id, role: 'owner', active: true });
@@ -598,7 +718,8 @@ api.post('/auth/demo', auth.mintRateLimit, wrap(async (req, res) => {
 }));
 
 api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
-  fl_recordVisit(req, 'customer');
+  const visitor = await resolveVisitor(req, res);
+  fl_recordVisit(req, 'customer', visitor && visitor._id);
   const { phone, name = '', slug = '' } = req.body || {};
   if (!phone) return bad(res, 400, 'phone is required');
   let customer = await Customer.findOne({ phone: String(phone) });
@@ -612,6 +733,11 @@ api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
     // and the storefront is not a paying surface at all: this endpoint's job is a
     // customer token and nothing else. `zu` remains in the answer so the app's
     // existing shape does not break, and it is honestly zero.
+  }
+  // THE BUYER BIND: the identity gains the customer it belongs to (idempotent) —
+  // placed AFTER the create, so a first-time buyer binds the document that exists.
+  if (visitor) {
+    try { await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { customerId: customer._id } }); } catch { /* never blocks the mint */ }
   }
   return ok(res, {
     token: auth.mintCustomerToken(customer._id),

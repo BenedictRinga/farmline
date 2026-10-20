@@ -680,6 +680,36 @@ const zuClaimSchema = new Schema({
 }, { timestamps: true });
 zuClaimSchema.index({ farmId: 1, status: 1 });
 
+// ── THE VISITOR IDENTITY (2026-10-20, the Zyppar guest model, farmline-shaped —
+// the founder: "How are we identifying Farmline users — by deviceId or ip? That
+// is an architecture we need to normalize, fast"; then: "Look at Zyppar's
+// handling of isGuest users and refresh your advice... Do it. Provide for
+// migration of current users"): A VISITOR IS A USER. One identity class; isGuest
+// marks the registration CADRE, never a quality rank (the charter's law).
+//   · deviceId — THE device↔identity binding, unique, the resolution key (the
+//     Zyppar shape: body deviceId → the farmline_device cookie → mint fresh).
+//   · feedbackId — the FL- id this identity owns (the feedback silo JOINS the
+//     identity here — the migration path for every existing install).
+//   · memberId / customerId — the conversion links: when the visitor registers
+//     (farmer) or mints (customer), the SAME identity flips isGuest:false and
+//     gains the account — the visit ledger's history flows into the account's
+//     history. IP can never buy this join.
+// The visit ledger keys its rows on this id (ip stays as the secondary signal —
+// geo, abuse forensics, crawlers — masked at display, as the wire already does).
+const identitySchema = new Schema({
+  deviceId: { type: String, required: true, unique: true, index: true },
+  isGuest: { type: Boolean, default: true },
+  feedbackId: { type: String, default: '', index: true },
+  memberId: { type: Schema.Types.ObjectId, ref: 'Member', default: null },
+  customerId: { type: Schema.Types.ObjectId, ref: 'Customer', default: null },
+  locale: { type: String, default: '' },
+  tz: { type: String, default: '' },
+  countryHint: { type: String, default: '' },
+  lastSeenAt: { type: Date, default: Date.now },
+  lastSrc: { type: String, default: '', maxlength: 24 },   // the identity's last channel tag
+  metadata: { botMint: { type: Boolean, default: false }, crawlerName: { type: String, default: '' } },
+}, { timestamps: true });
+
 module.exports = {
   conn,
   migrateLegacyIndexes,
@@ -704,4 +734,5 @@ module.exports = {
   MetaCounter: conn.model('MetaCounter', metaCounterSchema),
   Rating: conn.model('Rating', ratingSchema),
   ZuClaim: conn.model('ZuClaim', zuClaimSchema),
+  VisitorIdentity: conn.model('VisitorIdentity', identitySchema),
 };

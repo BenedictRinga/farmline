@@ -72,6 +72,15 @@ async function ensureId(deviceId) {
   return null;
 }
 
+/** THE ADOPTION LOOKUP (the visitor identity's migration, 2026-10-20): the FL-
+ *  id already bound to this device, or '' — read-only, never a mint (the
+ *  identity's adoption must not manufacture threads). */
+async function feedbackIdForDevice(deviceId) {
+  if (!deviceId) return '';
+  const t = await FeedbackChat.findOne({ deviceId }).lean().catch(() => null);
+  return (t && t.feedbackId) || '';
+}
+
 /** The scope check: the id must belong to the device presenting it. */
 async function threadFor(deviceId, feedbackId) {
   if (!deviceId || !feedbackId) return null;
@@ -174,4 +183,4 @@ async function reply(feedbackId, text) {
   return { ok: true };
 }
 
-module.exports = { mintFeedbackId, ensureId, threadFor, threadMessages, send, read, inbox, reply };
+module.exports = { mintFeedbackId, ensureId, feedbackIdForDevice, threadFor, threadMessages, send, read, inbox, reply };

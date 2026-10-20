@@ -1229,6 +1229,54 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
     assert(child('development') === 'next', 'development without AUTH_SECRET keeps the honest grace (the dev principal walks)');
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // === M10. THE VISITOR IDENTITY (the Zyppar guest model, 2026-10-20) =========
+  // A VISITOR IS A USER: the mint door resolves-or-creates by deviceId (the
+  // device↔identity binding — devices clash over an ip, never over a deviceId),
+  // the mint is idempotent (same device, same identity, forever), the ten-year
+  // HttpOnly cookie anchors every touch, the feedback silo ADOPTS into the
+  // identity (the migration of current users, proven live), and the conversion
+  // join flips isGuest:false the moment the person registers.
+  console.log('\n=== M10. the visitor identity: mint, idempotency, the cookie, the adoption, the conversion join ===');
+  const m10Device = 'm10' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  // 1. THE MINT
+  const m10Res = await fetch(BASE + '/identity/mint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: m10Device }) });
+  const m10 = await m10Res.json().catch(() => null);
+  assert(m10?.ok === true && m10?.id, 'the visitor identity mints (a visitor is a user)');
+  assert(m10.isGuest === true, 'a fresh identity is honestly a guest (isGuest marks the cadre)');
+  // 2. THE TEN-YEAR ANCHOR — the cookie is set, HttpOnly, first-party
+  const m10SetCookie = (m10Res.headers.get('set-cookie') || '');
+  assert(m10SetCookie.includes('farmline_device='), 'the device cookie anchors on the mint (farmline_device is set)');
+  assert(m10SetCookie.toLowerCase().includes('httponly'), 'the device cookie is HttpOnly (script storage purges cannot touch it)');
+  assert(m10SetCookie.includes('Max-Age=3153') || m10SetCookie.includes('max-age=3153'), 'the device cookie anchors for a decade');
+  // 3. THE IDEMPOTENCE — same device, same identity, forever
+  const m10Again = await req('POST', '/identity/mint', { body: { deviceId: m10Device } });
+  assert(String(m10Again.body?.id) === String(m10.id), 'a re-mint returns the SAME identity (one device, one identity, forever)');
+  // 4. THE ADOPTION (the migration): a device with an existing feedback thread
+  //    joins its FL- id into its identity at the first mint — no backfill.
+  const m10FbDevice = 'm10fb' + Date.now().toString(36);
+  const m10Fb = await req('POST', '/feedback/id', { body: { deviceId: m10FbDevice } });
+  const m10FbId = m10Fb.body?.feedbackId;
+  assert(!!m10FbId, 'the feedback identity mints (the migration\'s source silo)');
+  const m10Adopt = await req('POST', '/identity/mint', { body: { deviceId: m10FbDevice, feedbackId: m10FbId } });
+  assert(m10Adopt.body?.feedbackId === m10FbId, 'the feedback silo adopts into the identity (the current-user migration, live)');
+  // 5. THE CONVERSION JOIN — the register flips the SAME identity to the account.
+  const m10Phone = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
+  const m10Reg = await req('POST', '/auth/farmer/register', { body: { phone: m10Phone, pin: '1234', name: 'M10 Farmer', farmName: 'M10 Farm', deviceId: m10Device } });
+  assert(m10Reg.status === 200, 'the farmer registers with the device in hand');
+  const m10After = await req('POST', '/identity/mint', { body: { deviceId: m10Device } });
+  assert(m10After.body?.isGuest === false, 'the SAME identity flips isGuest:false at registration (the conversion join)');
+  assert(!!m10After.body?.memberId, 'the identity carries the member it became (the ledger\'s history flows into the account)');
+  // 6. THE COOKIE-CARRIED RETURN — a request bearing ONLY the cookie resolves
+  //    the same identity (the anchor that survives storage purges).
+  const m10CookieVal = (m10SetCookie.match(/farmline_device=([^;]+)/) || [])[1] || '';
+  const m10CookieRes = await fetch(BASE + '/identity/mint', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': 'farmline_device=' + m10CookieVal },
+    body: JSON.stringify({}),
+  });
+  const m10CookieBody = await m10CookieRes.json().catch(() => null);
+  assert(String(m10CookieBody?.id) === String(m10.id), 'a cookie-only touch resolves the SAME identity (the anchor that survives the purge)');
+
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('TEST CRASHED:', e); process.exit(1); });
