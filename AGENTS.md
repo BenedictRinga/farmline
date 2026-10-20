@@ -57,6 +57,70 @@
   still disagree, PROPOSE in your reply with evidence — do not silently
   re-architecture, re-deploy by tarball, or re-edit nginx around the gates.
 <!-- ═══════════════════════════════════════════════════════════════ -->
+# ⚓ BINDING IDENTITY DOCTRINE — THE VISITOR IS A USER (user directive 2026-10-20)
+
+> **IMMUTABLE except on the founder's say-so.** Every thread working on the
+> farmline SERVER reads this section before touching identity, auth, the
+> visit ledger, the feedback machinery, or the beacon, and DESISTS from
+> imposing its own divergent understanding — the same defer-to-it contract
+> as the deploy doctrine above. The app-side mirror lives in
+> `farmline-app/AGENTS.md` — the two sides move together. Built and proven
+> 2026-10-20: farmline `eef3eda` (build 44) · farmline-app `ea1113f`
+> (build 64) · zypparserver `798db67f` — **M10 in test/integration.js
+> carries the ten live assertions.**
+
+## THE LAW — A VISITOR IS A USER
+- farmline has **ONE identity class**. `isGuest` marks the **registration
+  cadre** only — never a quality rank, never a storage tier, never a gate
+  class (the Zyppar charter's one-user-class law, imported whole).
+- Identity is **`VisitorIdentity`** (`src/models.js`): `deviceId` is **THE
+  device↔identity binding** (unique, the resolution key) — devices clash
+  over an ip address (CGNAT puts thousands behind one), **never over a
+  deviceId**. `feedbackId` / `memberId` / `customerId` are the JOINS.
+  `locale`/`tz`/`countryHint`/`lastSrc` are the device's own words;
+  `metadata.botMint` marks crawler mints — **marked, never blocked**.
+
+## THE RESOLUTION ORDER — NEVER DEVIATE
+1. the body's `deviceId` → 2. the **`farmline_device` cookie** → 3. mint fresh
+— and **the mint door (`POST /identity/mint`, `src/index.js`) is the ONLY
+fresh-mint site**. `resolveVisitor()` resolve-or-creates by deviceId
+(idempotent: same device, same identity, forever) and the cookie re-anchors
+on EVERY touch: HttpOnly, sameSite lax, secure, first-party, **ten years** —
+server-set cookies are EXEMPT from WebKit ITP's script-storage purge, which
+is exactly the churn Zyppar cured. A request bearing NO device anchor keeps
+its honest ip-only ledger row — **never a fabricated identity**. The cookie
+is parsed by `readCookie()` — no cookie-parser dependency; same-origin today
+so no nginx change.
+
+## THE SERVER'S DUTY
+- **Every visit row carries `identityId`** (`fl_recordVisit(req, kind,
+  identityId)`) — the beacon, the meeting events, the demo door, the register,
+  the login, the customer mint, and the mint's own row. `ip` stays in the row
+  as the SECONDARY signal (geo, abuse forensics, crawlers) and is **masked at
+  display** (the wire's `_maskIp`) — **NEVER a person-key**.
+- **THE ADOPTION IS THE MIGRATION** (`feedback.feedbackIdForDevice`): a device
+  whose FeedbackChat exists lends its FL- id to its identity at first touch —
+  read-only, never manufactures threads. The client's stored pair binds at
+  the mint too (belt to the adoption's braces).
+- **THE CONVERSION JOIN**: the register flips the SAME identity
+  `isGuest: false` and binds the member; every login re-binds idempotently;
+  the customer mint binds the buyer. The ledger's history becomes the
+  account's history — the funnel is a PERSON'S STORY, the thing an ip can
+  never buy.
+- **HISTORY IS NEVER REWRITTEN**: the ip-keyed rows read honestly through the
+  CommandCenter wire's `$ifNull: [identityId, ip]` fallback
+  (`zypparserver/src/services/analytics.service.ts`); no destructive
+  backfills, ever.
+
+## WHAT NEVER — the regressions this section exists to prevent
+- No identity fabrication outside the mint door. No person keyed on IP. No
+  identity material in sessionStorage (app-side law, mirrored here). No
+  sessionId-as-identity. No "fixing away" `isGuest` (the cadre marker's
+  deprecation is a charter violation). No gate that treats guests as lesser
+  citizens. The client-side companion (`IdentityService`, the beacon
+  payloads) lives in the **`farmline-app`** repo — the two sides move
+  together.
+<!-- ═══════════════════════════════════════════════════════════════ -->
 
 
 Mirrors the LoopKeeper (`rolodex-server`) conventions deliberately. Read this before changing anything.
