@@ -403,10 +403,18 @@ api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
  * Read from the BODY, so every door can carry it — the app knows how it was launched
  * and sends the same tag on the beacon, the register, the demo and the customer mint.
  */
-const VISIT_SRC = ['app', 'shop', 'settings', 'demo', 'guide', 'buyer', 'status', 'founder']; // 'founder' = the founder's own device (his daily walks are legitimate traffic but HIS - the aggregations separate them from farmer traffic without excluding him)
+// 2026-10-20 THE DISTRIBUTION TAGS: the one-week program posts to X, LinkedIn and WhatsApp;
+// its measurement law depends on the ?src= tag reaching the ledger. These join the list.
+const VISIT_SRC = ['app', 'shop', 'settings', 'demo', 'guide', 'buyer', 'status', 'founder',
+  'x', 'li', 'tg', 'fb', 'ig', 'wa-status', 'wa-grp']; // 'founder' = the founder's own device (his daily walks are legitimate traffic but HIS - the aggregations separate them from farmer traffic without excluding him)
 function cleanSrc(v) {
-  const s = String(v || '').trim().toLowerCase().slice(0, 20);
-  return VISIT_SRC.includes(s) ? s : '';
+  const s = String(v || '').trim().toLowerCase().slice(0, 24);
+  if (!s) return '';
+  if (VISIT_SRC.includes(s)) return s;
+  // THE GROUP FAMILY: wa-grp-<name> carries the group identity - that is the whole point of
+  // tagging a group send. Bounded shape, never arbitrary text.
+  if (/^wa-grp-[a-z0-9_-]{1,16}$/.test(s)) return s;
+  return '';
 }
 
 // ── THE VISIT-LEDGER GUARDRAIL (the founder, 2026-10-13: "guardrail the
