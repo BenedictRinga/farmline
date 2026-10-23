@@ -50,6 +50,7 @@ const protocols = require('./protocols');
 const stages = require('./stages');
 const feedback = require('./feedback');
 const metacounter = require('./metacounter');
+const wireSummary = require('./wire-summary').wireSummaryHandler; // 2026-10-23 THE WIRE COMES HOME — Farmline's own CommandCenter card
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
   ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating, ZuClaim, VisitorIdentity, FeedbackChat,
@@ -715,6 +716,20 @@ api.post('/meeting/event', shellBeaconRateLimit, wrap(async (req, res) => {
 // ── THE MINT DOOR (the Zyppar guest mint, farmline-shaped) ───────────────────
 // The app calls this ONCE per boot (its identity service keeps the answer in
 // durable storage). Resolution: body deviceId → the farmline_device cookie →
+// ── 2026-10-23 THE WIRE COMES HOME (the founder: "Complete the separation now -
+// all three") — Farmline's OWN wire summary, served HERE. Until today
+// zypparserver held Farmline's database credentials to compute this card for
+// the CommandCenter; from today the credential is RETIRED and the card reads
+// Farmline's own computation through the already-proxied /api/farmline path.
+// The gate: x-ringaid ∈ WIRE_COMMANDER_IDS (farmline-server/.env).
+api.get('/wire-summary', wrap(async (req, res) => {
+  const allowed = String(process.env.WIRE_COMMANDER_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const caller = String(req.headers['x-ringaid'] || req.headers['X-Ringaid'] || '');
+  if (!allowed.length || !allowed.includes(caller)) return res.status(403).json({ ok: false, error: 'not a wire commander' });
+  const payload = await wireSummary();
+  return res.status(200).json(payload);
+}));
+
 // mint fresh. THE ADOPTION IS THE MIGRATION: an existing install's stored
 // deviceId mints ITS identity, and the feedback silo's FL- id joins it — no
 // backfill, no break, the rating history follows the person into the account
