@@ -572,8 +572,17 @@ function fl_recordVisit(req, kind, identityId) {
       src: cleanSrc(req.body?.src),
       // THE DEVICE ORIGIN fields (absent on old clients — never fabricated).
       locale, tz, countryHint,
-    }).catch(() => { /* the ledger never blocks an auth flow */ });
-  } catch { /* never blocks */ }
+    }).catch((e) => {
+      // 2026-10-23 THE DOOR REOPENED (the founder's ruling: never "shut the
+      // door on inspection of errors"). The ledger still never blocks an auth
+      // flow — but a failed write now SAYS SO. This silence is exactly how a
+      // 49-hour ledger stop hid from every log: the endpoint smiled "ok" while
+      // no row ever landed anywhere.
+      console.error('[visits] write failed:', e?.message || String(e));
+    });
+  } catch (e) {
+    console.error('[visits] record failed:', e?.message || String(e));
+  }
 }
 
 // ── THE SHELL BEACON — the CommandCenter wire's OTHER half ─────────────────────
