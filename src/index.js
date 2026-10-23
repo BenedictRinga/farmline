@@ -52,7 +52,7 @@ const feedback = require('./feedback');
 const metacounter = require('./metacounter');
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
-  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating, ZuClaim, VisitorIdentity,
+  ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating, ZuClaim, VisitorIdentity, FeedbackChat,
 } = require('./models');
 
 const app = express();
@@ -364,7 +364,13 @@ api.post('/auth/farmer/register', auth.mintRateLimit, wrap(async (req, res) => {
   const { salt, hash } = auth.hashPin(pin);
   const member = await Member.create({ farmId: farm._id, phone: String(phone), name, role: 'owner', pinSalt: salt, pinHash: hash });
   if (visitor) {
-    try { await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { isGuest: false, memberId: member._id } }); } catch { /* the join never blocks the registration */ }
+    // THE PERFECT SYNC (the founder, 2026-10-23): the join is bidirectional —
+    // the identity gains the member AND the member carries the identity it
+    // grew from. The account's origin is its own document's fact.
+    try {
+      await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { isGuest: false, memberId: member._id } });
+      await Member.updateOne({ _id: member._id }, { $set: { identityId: visitor._id } });
+    } catch { /* the join never blocks the registration */ }
   }
 
   return ok(res, {
@@ -383,8 +389,12 @@ api.post('/auth/farmer/login', auth.mintRateLimit, wrap(async (req, res) => {
   if (!member || !auth.checkPin(pin, member.pinSalt, member.pinHash)) return bad(res, 401, 'wrong number or PIN');
   // THE CONVERSION/RETURN BIND (idempotent): the farmer's device identity joins
   // the account on every return — the ledger reads one person's story.
+  // THE PERFECT SYNC (the founder, 2026-10-23): both directions, every return.
   if (visitor) {
-    try { await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { isGuest: false, memberId: member._id } }); } catch { /* the join never blocks the sign-in */ }
+    try {
+      await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { isGuest: false, memberId: member._id } });
+      await Member.updateOne({ _id: member._id }, { $set: { identityId: visitor._id } });
+    } catch { /* the join never blocks the sign-in */ }
   }
   const farm = await Farm.findById(member.farmId);
   return ok(res, {
@@ -505,11 +515,35 @@ async function resolveVisitor(req, res) {
       }
     }
     if (created) {
-      // THE MIGRATION (the founder: "provide for migration of current users"):
-      // the feedback silo's thread bound to this deviceId lends its FL- id.
+      // THE CUTOVER MADE VISIBLE (the founder, 2026-10-23: "cut existing ip-tied
+      // users over to deviceId when next they come online"): the ip this device
+      // arrived under is recorded on its identity ONCE — the person's passage
+      // from the ip era to the deviceId era, in their own document. Never
+      // updated after (the honest-history law: the ip era stays labeled).
+      // DEFENSIVE BY DESIGN: spread-shaped callers may arrive headerless.
+      const hdrs = req.headers || {};
+      const ip0 = String(hdrs['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim().slice(0, 64) || '';
+      if (ip0) {
+        try { await VisitorIdentity.updateOne({ _id: identity._id }, { $set: { firstIp: ip0 } }); } catch { /* never blocks */ }
+      }
+    }
+    // THE MIGRATION (the founder: "provide for migration of current users") —
+    // and 2026-10-23 THE PERFECT SYNC (the founder: "their records, if any
+    // associated, migrate in perfect sync to their new identity"): the adoption
+    // no longer waits for the identity's creation. An existing install that
+    // opened its feedback thread AFTER its first mint adopts here too — the
+    // guard is the identity's own empty field, so the touch is idempotent and
+    // cheap (one indexed findOne, only while the thread is unadopted). And the
+    // join is BIDIRECTIONAL now: the thread carries its person (identityId) the
+    // same moment the person carries their thread (feedbackId) — either side
+    // alone was half a sync.
+    if (!identity.feedbackId) {
       const fbId = await feedback.feedbackIdForDevice(deviceId);
       if (fbId) {
         await VisitorIdentity.updateOne({ _id: identity._id }, { $set: { feedbackId: fbId } }).catch(() => null);
+        await FeedbackChat.updateOne({ deviceId }, { $set: { identityId: identity._id } }).catch((e) => {
+          console.error('[identity] feedback adoption stamp failed:', e?.message || String(e));
+        });
         identity.feedbackId = fbId;
       }
     }
@@ -527,7 +561,12 @@ async function resolveVisitor(req, res) {
       res.cookie(DEVICE_COOKIE, deviceId, { httpOnly: true, sameSite: 'lax', secure: true, maxAge: 10 * 365 * 24 * 3600 * 1000, path: '/' });
     }
     return identity;
-  } catch { return null; }   // identity resolution never blocks the door it serves
+  } catch (e) {
+    // THE DOOR REOPENED (the founder's ruling, 2026-10-23): resolution still
+    // never blocks the door it serves — but it no longer lies by silence.
+    console.error('[identity] resolve failed:', e?.message || String(e));
+    return null;
+  }
 }
 function fl_recordVisit(req, kind, identityId) {
   try {
@@ -683,7 +722,11 @@ api.post('/meeting/event', shellBeaconRateLimit, wrap(async (req, res) => {
 api.post('/identity/mint', shellBeaconRateLimit, wrap(async (req, res) => {
   const deviceId = String(req.body?.deviceId || '').trim().slice(0, 64) || readCookie(req, DEVICE_COOKIE)
     || (await import('crypto')).randomUUID();   // the mint door is the ONLY fresh-mint site
-  const identity = await resolveVisitor({ ...req, body: { ...req.body, deviceId } }, res);
+  // THE SPREAD CARRIES ITS OWN (2026-10-23, the smoke caught it): `{ ...req }`
+  // copies only own-enumerable props — headers/socket are prototype accessors on
+  // IncomingMessage, so the spread object arrived headerless and the cutover's
+  // firstIp read `undefined.headers`. The mint now hands them across explicitly.
+  const identity = await resolveVisitor({ ...req, body: { ...req.body, deviceId }, headers: req.headers, socket: req.socket }, res);
   if (!identity) return bad(res, 500, 'the identity could not be minted');
   // The client's stored feedback pair binds here too (belt to the adoption's braces).
   const fbFrom = String(req.body?.feedbackId || '').toUpperCase().slice(0, 16);
@@ -691,6 +734,11 @@ api.post('/identity/mint', shellBeaconRateLimit, wrap(async (req, res) => {
     const okPair = await feedback.threadFor(deviceId, fbFrom).catch(() => null);
     if (okPair) {
       await VisitorIdentity.updateOne({ _id: identity._id }, { $set: { feedbackId: fbFrom } }).catch(() => null);
+      // THE PERFECT SYNC: the thread carries its person the same moment the
+      // person carries their thread (the join is bidirectional, idempotent).
+      await FeedbackChat.updateOne({ deviceId }, { $set: { identityId: identity._id } }).catch((e) => {
+        console.error('[identity] mint adoption stamp failed:', e?.message || String(e));
+      });
       identity.feedbackId = fbFrom;
     }
   }
@@ -745,8 +793,12 @@ api.post('/auth/customer', auth.mintRateLimit, wrap(async (req, res) => {
   }
   // THE BUYER BIND: the identity gains the customer it belongs to (idempotent) —
   // placed AFTER the create, so a first-time buyer binds the document that exists.
+  // THE PERFECT SYNC (the founder, 2026-10-23): both directions.
   if (visitor) {
-    try { await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { customerId: customer._id } }); } catch { /* never blocks the mint */ }
+    try {
+      await VisitorIdentity.updateOne({ _id: visitor._id }, { $set: { customerId: customer._id } });
+      await Customer.updateOne({ _id: customer._id }, { $set: { identityId: visitor._id } });
+    } catch { /* never blocks the mint */ }
   }
   return ok(res, {
     token: auth.mintCustomerToken(customer._id),

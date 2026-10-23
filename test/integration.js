@@ -1276,6 +1276,19 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   });
   const m10CookieBody = await m10CookieRes.json().catch(() => null);
   assert(String(m10CookieBody?.id) === String(m10.id), 'a cookie-only touch resolves the SAME identity (the anchor that survives the purge)');
+  // 7. THE PERFECT SYNC (the founder, 2026-10-23: "their records, if any
+  //    associated, migrate in perfect sync to their new identity") — the joins
+  //    are BIDIRECTIONAL and the cutover is VISIBLE, read straight from the db.
+  const m10Models = require('../src/models');
+  const m10Thread = await m10Models.FeedbackChat.findOne({ deviceId: m10FbDevice }).lean();
+  assert(String(m10Thread?.identityId || '') === String(m10Adopt.body?.id),
+    'the thread carries its person (the adoption stamped identityId — the sync is bidirectional)');
+  const m10Member = await m10Models.Member.findOne({ phone: m10Phone }).lean();
+  assert(String(m10Member?.identityId || '') === String(m10.id),
+    'the member carries the identity it grew from (the register stamped identityId)');
+  const m10IdDoc = await m10Models.VisitorIdentity.findOne({ deviceId: m10Device }).lean();
+  assert(!!m10IdDoc?.firstIp,
+    'the identity carries the ip it arrived under (the cutover made visible, recorded once)');
 
   console.log('\n' + (fail ? `RESULT: ${fail} failure(s)` : `RESULT: all checks passed`));
   process.exit(fail ? 1 : 0);

@@ -143,12 +143,18 @@ const memberSchema = new Schema({
   pinSalt: String,
   pinHash: String,
   active: { type: Boolean, default: true },
+  // THE PERFECT SYNC (the founder, 2026-10-23): the account carries the visitor
+  // identity it grew from — the register/login joins stamp both directions.
+  identityId: { type: Schema.Types.ObjectId, ref: 'VisitorIdentity', default: null, index: true },
 }, { timestamps: true });
 memberSchema.index({ farmId: 1, phone: 1 }, { unique: true });
 
 const customerSchema = new Schema({
   phone: { type: String, required: true, unique: true, index: true },
   name: { type: String, default: '' },
+  // THE PERFECT SYNC (the founder, 2026-10-23): the buyer's account carries the
+  // visitor identity it belongs to — the customer-mint join stamps both ways.
+  identityId: { type: Schema.Types.ObjectId, ref: 'VisitorIdentity', default: null, index: true },
   // Customers are rated too (spec v4 §5.5): for perishable produce a no-show at
   // pick-up is a direct loss to the farmer.
   rating: { sum: { type: Number, default: 0 }, count: { type: Number, default: 0 } },
@@ -601,6 +607,11 @@ const feedbackChatSchema = new Schema({
   // or a read must present the deviceId the id was minted to.
   feedbackId: { type: String, required: true, unique: true, index: true },
   deviceId: { type: String, required: true, unique: true, index: true },
+  // THE PERFECT SYNC (the founder, 2026-10-23: "their records, if any associated,
+  // migrate in perfect sync to their new identity"): the thread carries its
+  // person. Stamped by the adoption/mint paths (bidirectional with the
+  // identity's feedbackId); additive — old threads gain it on first touch.
+  identityId: { type: Schema.Types.ObjectId, ref: 'VisitorIdentity', default: null, index: true },
   // READ RECEIPTS both ways (LoopKeeper server 135): senderReadAt on the sender's
   // own read, hqReadAt on the admin inbox fetch — so the sender can see their
   // report has been picked up.
@@ -702,6 +713,10 @@ const identitySchema = new Schema({
   feedbackId: { type: String, default: '', index: true },
   memberId: { type: Schema.Types.ObjectId, ref: 'Member', default: null },
   customerId: { type: Schema.Types.ObjectId, ref: 'Customer', default: null },
+  // THE CUTOVER MADE VISIBLE (the founder, 2026-10-23: "cut existing ip-tied
+  // users over to deviceId"): the ip the device arrived under at its identity's
+  // birth — the person's passage from the ip era, recorded once, never updated.
+  firstIp: { type: String, default: '' },
   locale: { type: String, default: '' },
   tz: { type: String, default: '' },
   countryHint: { type: String, default: '' },
