@@ -129,7 +129,9 @@ console.log('\ndatabase');
 // it OURS? So we probe rather than assume.
 const useLocal = (get('FARMLINE_USE_LOCAL_MONGO') || 'true') === 'true';
 pass(`local mongo: ${useLocal}`);
-const uri = get('MONGO_DB_URI_FARMLINE') || get('MONGO_LOCAL_URI') || (useLocal ? 'mongodb://127.0.0.1:27017/farmline' : '');
+// THE DEV NAME LAW (2026-10-23): the local default is farmline_dev — the bare
+// `farmline` name is reserved for production (the app's own URI on the droplet).
+const uri = get('MONGO_DB_URI_FARMLINE') || get('MONGO_LOCAL_URI') || (useLocal ? 'mongodb://127.0.0.1:27017/farmline_dev' : '');
 // The one invariant that must never break: farmline owns its own database.
 const dbName = (uri.match(/\/([^/?]+)(\?|$)/) || [])[1] || '';
 if (!uri) {

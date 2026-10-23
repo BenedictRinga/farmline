@@ -42,7 +42,16 @@ function resolveMongoUri() {
   if (explicit) return explicit;
 
   // Local dev default: the mongod already running on this machine.
-  const local = envVar('MONGO_LOCAL_URI', 'mongodb://localhost:27017/farmline');
+  // THE DEV NAME LAW (the founder, 2026-10-23: "Rename this local farmline
+  // server ... so that it is unmistakeably only for development, and is never
+  // confused again as a production destination or backend resource"): the local
+  // dev database is `farmline_dev` — the bare `farmline` name is RESERVED for
+  // production (the app's own MONGO_DB_URI_FARMLINE on the droplet). The 2026-10-13
+  // silent-fallback wound was exactly this name on a production host: weeks of
+  // production rows landing in a dev-shaped hole. The dev db was RENAMED on the
+  // droplet's local mongod the same day (farmline -> farmline_dev, collections
+  // moved in place, the old name dropped).
+  const local = envVar('MONGO_LOCAL_URI', 'mongodb://localhost:27017/farmline_dev');
   // ── THE SECOND `return local;`, KILLED (2026-10-13) ─────────────────────────────
   // The refusal below replaced the LAST silent fallback. This one — guarded by a flag that
   // DEFAULTED TO TRUE — sat above it and shadowed it, so any host where the flag was absent

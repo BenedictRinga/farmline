@@ -40,7 +40,7 @@ const PHONE = '07' + String(Math.floor(10000000 + Math.random() * 89999999));
   console.log(`  info  db=${hr?.db} dbName=${hr?.dbName} zuDoorOpen=${hr?.zuOpen}`);
   // THE INTENT, NOT THE NAME (2026-10-13): this asserted dbName === 'farmline', which is the
   // rule that made a test database impossible. What it MEANS is never zyppar, never rolodex.
-  assert(/^farmline(_test)?$/.test(String(hr?.dbName || '')),
+  assert(/^farmline(_dev|_test)?$/.test(String(hr?.dbName || '')),
     `connected to a farmline database, never zyppar or rolodex (got "${hr?.dbName}")`);
   assert(require('../src/auth').authArmed === true, 'the write gate is ARMED (AUTH_SECRET set)');
 
