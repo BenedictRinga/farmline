@@ -723,11 +723,11 @@ api.post('/meeting/event', shellBeaconRateLimit, wrap(async (req, res) => {
 // Farmline's own computation through the already-proxied /api/farmline path.
 // The gate: x-ringaid ∈ WIRE_COMMANDER_IDS (farmline-server/.env).
 api.get('/wire-summary', wrap(async (req, res) => {
-  const allowed = String(process.env.WIRE_COMMANDER_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const caller = String(req.headers['x-ringaid'] || req.headers['X-Ringaid'] || '');
-  if (!allowed.length || !allowed.includes(caller)) return res.status(403).json({ ok: false, error: 'not a wire commander' });
-  const payload = await wireSummary();
-  return res.status(200).json(payload);
+  // 2026-10-24 THE SINGLE GATE: the route DELEGATES to wireSummaryHandler —
+  // its gate reads WIRE_COMMANDER_IDS through config.envVar (the process env
+  // does not carry the .env values on this host, so an inline process.env
+  // read here 403'd every caller). One gate, in the handler, for good.
+  return wireSummary(req, res);
 }));
 
 // mint fresh. THE ADOPTION IS THE MIGRATION: an existing install's stored
