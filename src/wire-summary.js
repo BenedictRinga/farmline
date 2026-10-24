@@ -507,9 +507,13 @@ async function computeWireSummary() {
     };
 }
 
-/** THE GATE: x-ringaid must be one of WIRE_COMMANDER_IDS (farmline-server/.env). */
+/** THE GATE: x-ringaid must be one of WIRE_COMMANDER_IDS (farmline-server/.env).
+ *  2026-10-24 FIX: read through the config's envVar — the process env does NOT
+ *  carry the .env values on this host (the config reads the env FILES itself),
+ *  so the raw process.env read 403'd every caller. The config helper resolves
+ *  process.env first, then the env files — the same path the mongo URI uses. */
 async function wireSummaryHandler(req, res) {
-    const allowed = String(process.env.WIRE_COMMANDER_IDS || '')
+    const allowed = String(require('./config').envVar('WIRE_COMMANDER_IDS') || '')
         .split(',').map((s) => s.trim()).filter(Boolean);
     const caller = String((req.headers && (req.headers['x-ringaid'] || req.headers['X-Ringaid'])) || '');
     if (!allowed.length || !allowed.includes(caller)) {
