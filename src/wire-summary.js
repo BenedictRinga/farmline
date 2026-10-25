@@ -247,6 +247,63 @@ async function computeWireSummary() {
             pulseError = String(e?.message || e).slice(0, 90);
         }
 
+        // (e-2) THE PERSON-LEVEL SHARE PULSE (Round 4): a share link carries
+        // `?by=<sharer identity id>` and the receiver's boot beacon stores it
+        // as `refId` — so the wire can say "Jane's share moved 3 people",
+        // not just "3 arrivals via share-line". Keyed on the sharer's identity.
+        let referrers = null;
+        let referrersError = null;
+        try {
+            const refMatch = { at: { $gte: d30ago }, refId: { $exists: true, $nin: ['', null] } };
+            const [arrAgg, regAgg] = await Promise.all([
+                Vv.aggregate([
+                    { $match: refMatch },
+                    { $group: { _id: '$refId', arrivals: { $addToSet: { $toString: { $ifNull: ['$identityId', '$ip'] } } } } },
+                ]).toArray(),
+                Vv.aggregate([
+                    { $match: { ...refMatch, kind: 'register' } },
+                    { $group: { _id: '$refId', registered: { $addToSet: { $toString: { $ifNull: ['$identityId', '$ip'] } } } } },
+                ]).toArray(),
+            ]);
+            const map = new Map();
+            for (const r of arrAgg || []) {
+                map.set(String(r._id), { arrivals: (r.arrivals || []).filter(Boolean).length, registered: 0 });
+            }
+            for (const r of regAgg || []) {
+                const e = map.get(String(r._id));
+                if (e) e.registered = (r.registered || []).filter(Boolean).length;
+            }
+            const ids = [...map.keys()]
+                .map((x) => { try { return new (require('mongodb').ObjectId)(x); } catch { return null; } })
+                .filter(Boolean);
+            const idDocs = ids.length
+                ? await conn.db.collection('visitoridentities').find({ _id: { $in: ids } })
+                    .project({ deviceId: 1, isGuest: 1, memberId: 1 }).toArray()
+                : [];
+            const memberIds = idDocs.map((d) => d.memberId).filter(Boolean);
+            const memberDocs = memberIds.length
+                ? await conn.db.collection('members').find({ _id: { $in: memberIds } })
+                    .project({ name: 1 }).toArray()
+                : [];
+            const memberName = new Map((memberDocs || []).map((m) => [String(m._id), String(m.name || '')]));
+            const idMeta = new Map((idDocs || []).map((d) => [String(d._id), d]));
+            referrers = [...map.entries()].map(([id, e]) => {
+                const doc = idMeta.get(id) || {};
+                return {
+                    refId: id.slice(-6),
+                    name: memberName.get(String(doc.memberId || '')) || null,
+                    isGuest: doc.isGuest !== false,
+                    device: String(doc.deviceId || '').slice(-6),
+                    arrivals: e.arrivals,
+                    registered: e.registered,
+                    rate: e.arrivals >= RATE_FLOOR ? Math.round((e.registered / e.arrivals) * 1000) / 10 : null,
+                };
+            }).sort((a, b) => b.arrivals - a.arrivals).slice(0, 20);
+        } catch (e) {
+            referrers = null;
+            referrersError = String(e?.message || e).slice(0, 90);
+        }
+
         // (d-3) who came, and where they went
         const deviceOf = (ua) => {
             const uu = String(ua || '');
@@ -422,6 +479,8 @@ async function computeWireSummary() {
             uniqueNote: 'human devices only — crawlers excluded here and counted separately',
             pulse,
             pulseError,
+            referrers,
+            referrersError,
             prior: {
                 byKind: priorByKind.map((r) => ({ kind: r._id || 'unknown', n: r.n || 0 })),
                 note: 'the 7 days before the current 7 — human only, so a crawler surge cannot look like growth',

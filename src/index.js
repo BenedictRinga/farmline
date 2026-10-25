@@ -611,6 +611,15 @@ function fl_recordVisit(req, kind, identityId) {
       ref: String(req.headers['referer'] || '').slice(0, 240),
       // '' when untagged - an absent tag is honest, a guessed one is not.
       src: cleanSrc(req.body?.src),
+      // THE SHARER'S FINGERPRINT (Round 4): when this visit arrived through a
+      // share link, `refId` is the SHARER's identity id — the person-key that
+      // turns "3 arrivals via share-line" into "Jane's share moved 3 people".
+      // Stored as an ObjectId like identityId; invalid/absent reads null.
+      refId: (() => {
+        const raw = String(req.body?.refId || '').trim().slice(0, 64);
+        if (!/^[0-9a-f]{24}$/i.test(raw)) return null;
+        try { return new (require('mongoose').Types.ObjectId)(raw); } catch { return null; }
+      })(),
       // THE DEVICE ORIGIN fields (absent on old clients — never fabricated).
       locale, tz, countryHint,
     }).catch((e) => {
