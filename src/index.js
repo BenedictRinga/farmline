@@ -35,6 +35,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const config = require('./config');
+const { farmDay, farmMonth, FARM_TZ } = require('./time'); // 2026-10-25 THE UNIFIED FARM TIME — every day/month key and Mongo day-bucket reads this
 const auth = require('./auth');
 const vocab = require('./vocab');
 const ladder = require('./ladder');
@@ -93,10 +94,10 @@ const bad = (res, code, error) => res.status(code).json({ ok: false, error });
 // rides /health (errors5xxToday) so the watch and the CommandCenter wire can
 // alarm on error SPIKES, not just vision spend. In-memory and day-keyed: a
 // restart resets it, and `bootedAt` says so honestly.
-const errStats = { day: new Date().toISOString().slice(0, 10), n: 0, bootedAt: new Date().toISOString() };
+const errStats = { day: farmDay(), n: 0, bootedAt: new Date().toISOString() };
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   console.error('[farmline]', req.method, req.originalUrl, e?.message || e);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = farmDay();
   if (errStats.day === today) errStats.n += 1; else { errStats.day = today; errStats.n = 1; }
   if (!res.headersSent) res.status(500).json({ ok: false, error: e?.message || 'failed' });
 });
@@ -171,7 +172,7 @@ app.get('/api/farmline/sitemap.xml', async (req, res) => {
     // shop fronts stay crawlable by discovery, they just don't ride the sitemap.
     const farms = await Farm.find({ isDemo: { $ne: true }, slug: { $nin: ['kimani-farms'], $not: /persist-probe/ } }, { slug: 1, name: 1, updatedAt: 1 }).sort({ updatedAt: -1 }).limit(500).lean();
     const base = 'https://zyppar.com';
-    const today = new Date().toISOString().slice(0, 10);
+    const today = farmDay();
     const urls = [
       '  <url><loc>' + base + '/farmline/</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>',
       '  <url><loc>' + base + '/farmline/farms</loc><changefreq>daily</changefreq><priority>0.8</priority></url>',
@@ -179,7 +180,7 @@ app.get('/api/farmline/sitemap.xml', async (req, res) => {
     ];
     for (const f of farms) {
       if (!f.slug) continue;
-      const lastmod = f.updatedAt ? new Date(f.updatedAt).toISOString().slice(0, 10) : today;
+      const lastmod = f.updatedAt ? farmDay(f.updatedAt) : today;
       // C3: PATH-BASED URLs — the router is path-based (s/:slug), so every hash
       // URL landed on the splash; the crawlable shape is /farmline/s/<slug>.
       urls.push('  <url><loc>' + base + '/farmline/s/' + f.slug + '</loc><lastmod>' + lastmod + '</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>');
@@ -330,7 +331,7 @@ const healthPayloadAsync = async () => {
       : null;
   } catch { /* absent, not wrong — the watch is never blocked by the DB */ }
   // C7: the day's 5xx count — the watch alarms on error SPIKES, not just spend.
-  base.errors5xxToday = errStats.day === new Date().toISOString().slice(0, 10) ? errStats.n : 0;
+  base.errors5xxToday = errStats.day === farmDay() ? errStats.n : 0;
   base.bootedAt = errStats.bootedAt;
   return base;
 };
@@ -963,7 +964,7 @@ const visionIpKey = (req) => 'vision-ip-' + require('crypto').createHash('sha256
 // the general door charges the STANDALONE per-use price (default 2). Under the
 // allowance BOTH doors are free — the free access is the tier's.
 // THE DEMO: never counted, never charged — the visitor's walk is free forever.
-const eatMonthKey = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 7);
+const eatMonthKey = () => farmMonth(); // 2026-10-25: the unified farm month (Africa/Nairobi)
 
 async function visionAllowanceState(farm) {
   const monthKey = eatMonthKey();
@@ -2975,7 +2976,7 @@ async function farmFacts(farmId) {
     Log.aggregate([{ $match: real }, { $group: { _id: null, oldest: { $min: '$at' } } }]),
     Log.aggregate([
       { $match: { ...real, at: { $gte: since } } },
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$at' } } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$at', timezone: FARM_TZ } } } },
       { $count: 'days' },
     ]),
     Sellable.countDocuments({ farmId }),
@@ -3185,13 +3186,7 @@ const shapeClaim = (c) => ({
  * farmer collect twice within minutes by waiting for the clock to tick over.
  */
 function zuDayKey(now = new Date()) {
-  try {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(now);
-  } catch {
-    return now.toISOString().slice(0, 10);
-  }
+  return farmDay(now);
 }
 
 /**
@@ -3204,7 +3199,7 @@ async function isActiveFarm(farmId) {
   const since = new Date(Date.now() - 30 * 86400000);
   const agg = await Log.aggregate([
     { $match: { farmId: new Types.ObjectId(String(farmId)), estimated: { $ne: true }, at: { $gte: since } } },
-    { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$at' } } } },
+    { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$at', timezone: FARM_TZ } } } },
     { $count: 'days' },
   ]);
   return (agg[0]?.days || 0) >= zu.ACTIVE_LOGGING_DAYS;

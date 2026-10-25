@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { conn } = require('./models');
+const { farmDay, farmMidnight } = require('./time'); // 2026-10-25 THE UNIFIED FARM TIME — the wire's day keys and the logged-today boundary
 
 // THE CRAWLER CLASSIFICATION (ported from zypparserver's crawlerDetect — the
 // same table, so the two platforms' human counts agree).
@@ -128,7 +129,7 @@ async function computeWireSummary() {
             const trail = (pathsByIp[ip] = pathsByIp[ip] || []);
             if (trail[trail.length - 1] !== clean && !trail.includes(clean) && trail.length < 14) trail.push(clean);
         }
-        const day = new Date().toISOString().slice(0, 10);
+        const day = farmDay();
         shellByDay[day] = (shellByDay[day] || 0) + 1;
         const ref = (line.match(/"([^"]*)"[^"]*$/) || [])[1] || '';
         if (ref && ref !== '-') shellRefs[ref.slice(0, 80)] = (shellRefs[ref.slice(0, 80)] || 0) + 1;
@@ -160,7 +161,7 @@ async function computeWireSummary() {
     // (c) the demo vision spend
     let visionSpend = null;
     try {
-        const day = new Date().toISOString().slice(0, 10);
+        const day = farmDay();
         const mc = await conn.db.collection('metacounters').findOne({ key: 'vision-demo' });
         const today = mc && mc.day === day ? (mc.count || 0) : 0;
         const threshold = Number(process.env.FARMLINE_VISION_DEMO_THRESHOLD || '20') || 20;
@@ -173,8 +174,8 @@ async function computeWireSummary() {
     try {
         const d7ago = new Date(now - 7 * 86400000);
         const d30ago = new Date(now - 30 * 86400000);
-        const midnight = new Date(new Date().toISOString().slice(0, 10));
-        const today = new Date().toISOString().slice(0, 10);
+        const midnight = farmMidnight();
+        const today = farmDay();
         const dbIdentity = {
             name: String(conn.db?.databaseName || conn.name || ''),
             host: String(conn.host || '') + (conn.port ? ':' + conn.port : ''),

@@ -13,18 +13,17 @@
 // lost increment in a demo-counter race harms an alarm by one call and is
 // accepted (the comment says so; a stopwatch is not a ledger).
 const { MetaCounter } = require('./models');
+const { farmDay } = require('./time');
 
 const DAY_MS = 86400000;
 
-/** The UTC day key the counters are keyed by — B10 (the GLM audit, 2026-10-10):
+/** The day key the counters are keyed by — B10 (the GLM audit, 2026-10-10):
  *  the boundary is MIDNIGHT EAT (21:00 UTC), the working day the founder counts.
- *  The old +DAY_MS/2 shifted the key change to 15:00 EAT, resetting the daily
- *  spend mid-afternoon and re-arming the alarm threshold inside one working day.
- *  Adding 3h maps EAT dates onto UTC dates: a 21:00 UTC timestamp (+3h = 00:00
- *  next day) keys to the NEXT day, exactly as EAT reads it. Existing rows keyed
- *  by the old boundary simply reset on the next bump — honest, no migration. */
+ *  2026-10-25: now produced by the unified farm time service (src/time.js) —
+ *  the old +3h-to-UTC trick was exactly the arbitrary-clock class this module
+ *  retired. */
 function todayKey(at = new Date()) {
-  return new Date(at.getTime() + 3 * 3600_000).toISOString().slice(0, 10);
+  return farmDay(at);
 }
 
 /** +1 on the counter for `key` today; returns the new count. */

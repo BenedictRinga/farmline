@@ -117,6 +117,12 @@ const config = {
   // WHERE THE PUBLIC WORLD CAN REACH US.
   publicUrl: envVar('FARMLINE_PUBLIC_URL', 'https://zyppar.com'),
 
+  // ── THE UNIFIED FARM TIME (2026-10-25) ─────────────────────────────────────
+  // One calendar for every day/month key and every Mongo day-bucket: East
+  // Africa Time (Africa/Nairobi). Consumed by src/time.js; no other module may
+  // invent its own clock. Override with FARMLINE_TZ only deliberately.
+  timezone: envVar('FARMLINE_TZ', 'Africa/Nairobi'),
+
   // ── THE DEMO VISION SPEND (Task 3, 2026-10-10) — the daily threshold at which
   // the CommandCenter's Farmline Wire alarms. The demo farm's photo door makes
   // REAL billed model calls; the spend is counted (metacounters in the DB),
