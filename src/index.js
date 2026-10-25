@@ -51,6 +51,7 @@ const stages = require('./stages');
 const feedback = require('./feedback');
 const metacounter = require('./metacounter');
 const wireSummary = require('./wire-summary').wireSummaryHandler; // 2026-10-23 THE WIRE COMES HOME — Farmline's own CommandCenter card
+const wireVisitorTrail = require('./wire-summary').visitorTrailHandler; // 2026-10-25 THE VISITOR TRAIL — the wire's tap-through (directive #3)
 const {
   conn, Farm, Member, Customer, Plot, CropCycle, AnimalGroup, Animal,
   ScheduledEvent, Log, Hold, Sellable, Order, Ledger, PriceObservation, Rating, ZuClaim, VisitorIdentity, FeedbackChat,
@@ -728,6 +729,14 @@ api.get('/wire-summary', wrap(async (req, res) => {
   // does not carry the .env values on this host, so an inline process.env
   // read here 403'd every caller). One gate, in the handler, for good.
   return wireSummary(req, res);
+}));
+
+// THE VISITOR TRAIL (2026-10-25, the founder's directive #3): tapping a WHO
+// CAME line item in the CommandCenter releases ONE person's full beacon trail
+// — where they came from, where they went, every logged row. The commander
+// gate lives in the handler, the same x-ringaid list as the wire itself.
+api.get('/wire-visitor-trail', wrap(async (req, res) => {
+  return wireVisitorTrail(req, res);
 }));
 
 // mint fresh. THE ADOPTION IS THE MIGRATION: an existing install's stored

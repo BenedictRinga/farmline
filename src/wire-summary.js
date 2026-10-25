@@ -512,6 +512,55 @@ async function computeWireSummary() {
  *  carry the .env values on this host (the config reads the env FILES itself),
  *  so the raw process.env read 403'd every caller. The config helper resolves
  *  process.env first, then the env files — the same path the mongo URI uses. */
+/** THE VISITOR TRAIL (2026-10-25, the founder's directive #3, verbatim: "At
+ *  this early stage I should see where they came from, where they went and
+ *  all details looged by just tapping their line item") — ONE person's full
+ *  beacon trail. The key is the wire's OWN person key: an identity id (the
+ *  deviceId-cut person) or an ip (the ip-era rows). Same commander gate as
+ *  the wire; the identity doc rides along so the tap answers WHO it is (the
+ *  deviceId's last six, the guest state, the adopted feedback thread, the
+ *  member/customer join). Never fabricates: an unknown key reads empty.
+ */
+async function visitorTrailHandler(req, res) {
+    const allowed = String(require('./config').envVar('WIRE_COMMANDER_IDS') || '')
+        .split(',').map((s) => s.trim()).filter(Boolean);
+    const caller = String((req.headers && (req.headers['x-ringaid'] || req.headers['X-Ringaid'])) || '');
+    if (!allowed.length || !allowed.includes(caller)) {
+        return res.status(403).json({ ok: false, error: 'not a wire commander' });
+    }
+    try {
+        const { ObjectId } = require('mongodb');
+        const idHex = String((req.query && req.query.id) || '').trim();
+        const ipQ = String((req.query && req.query.ip) || '').trim();
+        if (!idHex && !ipQ) return res.status(400).json({ ok: false, error: 'no person key given' });
+        const isId = !!idHex && /^[0-9a-f]{24}$/i.test(idHex);
+        const V = conn.db.collection('visits');
+        const filter = isId ? { identityId: new ObjectId(idHex) } : { identityId: null, ip: ipQ.slice(0, 64) };
+        const rows = await V.find(filter)
+            .project({ at: 1, kind: 1, ip: 1, ua: 1, ref: 1, src: 1, tz: 1, locale: 1, countryHint: 1 })
+            .sort({ at: 1 }).limit(300).toArray();
+        let person = null;
+        if (isId) {
+            const doc = await conn.db.collection('visitoridentities').findOne({ _id: new ObjectId(idHex) });
+            if (doc) {
+                person = {
+                    id: String(doc._id),
+                    deviceId: String(doc.deviceId || '').slice(-6), // the card's convention: last six only
+                    isGuest: doc.isGuest !== false,
+                    feedbackId: String(doc.feedbackId || ''),
+                    memberId: doc.memberId ? String(doc.memberId) : null,
+                    customerId: doc.customerId ? String(doc.customerId) : null,
+                    locale: String(doc.locale || ''), tz: String(doc.tz || ''),
+                    createdAt: doc.createdAt || null, lastSeenAt: doc.lastSeenAt || null,
+                };
+            }
+        }
+        return res.status(200).json({ ok: true, key: isId ? ('id:' + idHex.slice(-6)) : ('ip:' + ipQ), person, trail: rows });
+    } catch (e) {
+        return res.status(500).json({ ok: false, error: 'the trail could not be read', detail: String(e?.message || e).slice(0, 120) });
+    }
+}
+
 async function wireSummaryHandler(req, res) {
     const allowed = String(require('./config').envVar('WIRE_COMMANDER_IDS') || '')
         .split(',').map((s) => s.trim()).filter(Boolean);
@@ -527,4 +576,4 @@ async function wireSummaryHandler(req, res) {
     }
 }
 
-module.exports = { wireSummaryHandler };
+module.exports = { wireSummaryHandler, visitorTrailHandler };
