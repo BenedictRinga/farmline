@@ -2468,6 +2468,19 @@ api.post('/feedback/id', auth.mintRateLimit, wrap(async (req, res) => {
   if (!deviceId) return bad(res, 400, 'deviceId required');
   const minted = await feedback.ensureId(deviceId);
   if (!minted) return bad(res, 500, 'feedback id mint failed');
+  // THE PERFECT SYNC, the other direction (2026-10-25): a visitor whose identity
+  // minted BEFORE their first chat now hands that identity's deviceId to the
+  // feedback silo (the client reuses it verbatim). Adopt HERE so the thread and
+  // the person join the SAME moment the thread is born — not on the next shell
+  // boot. The guard is the identity's own empty field, so the stamp is idempotent
+  // and cheap (one indexed findOne, only while the identity has no feedbackId).
+  const idt = await VisitorIdentity.findOne({ deviceId }).lean().catch(() => null);
+  if (idt && !idt.feedbackId) {
+    await VisitorIdentity.updateOne({ _id: idt._id }, { $set: { feedbackId: minted.feedbackId } }).catch(() => null);
+    await FeedbackChat.updateOne({ deviceId }, { $set: { identityId: idt._id } }).catch((e) => {
+      console.error('[identity] feedback mint adoption stamp failed:', e?.message || String(e));
+    });
+  }
   return ok(res, { ok: true, feedbackId: minted.feedbackId, created: minted.created });
 }));
 
